@@ -1,0 +1,40 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+.pnp
+.pnp.js
+
+# Build Outputs
+dist/
+frontend/dist/
+build/
+out/
+
+# .NET / C# build output
+**/[Bb]in/
+**/[Oo]bj/
+.vs/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Environment & OS
+.env*.local
+frontend/.env*.local
+.vscode/
+.DS_Store
+Thumbs.db
+*.log
+.brud/
+scratch/
+*.tsbuildinfo
+.superpowers/
+*.mdf
+*.ldf
+*.bak
+backend/Database/*.mdf
+backend/Database/*.ldf
+backend/Database/*.bak
+.vite_cache/
+frontend/.vite_cache/
