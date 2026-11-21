@@ -1,4 +1,4 @@
-﻿namespace AssessmentWebApi.Dto_s.StudentDto_s
+namespace AssessmentWebApi.Dto_s.StudentDto_s
 {
     /// <summary>
     /// Request body for enrolling one or more students into a competency (Course).
@@ -11,6 +11,9 @@
         /// The Course ID representing the competency to enroll into.
         /// </summary>
         public long CourseId { get; set; }
+
+        /// <summary>Optional specific Course Round ID to enroll into.</summary>
+        public long? CourseRoundId { get; set; }
 
         /// <summary>One or more student account IDs to enroll.</summary>
         public List<long> StudentIds { get; set; } = new();

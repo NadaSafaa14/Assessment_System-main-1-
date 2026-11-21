@@ -1,6 +1,6 @@
 "use client";
 
-import { useNavigate, useLocation, Link } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import {
   LogOut,
   LayoutDashboard,
@@ -12,8 +12,12 @@ import {
   BookOpen,
   Send,
   X,
-  ChevronRight,
   Shield,
+  Award,
+  TrendingUp,
+  Bell,
+  User,
+  CheckCircle2,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
@@ -34,13 +38,20 @@ const navByRole: Record<AccountRole, NavItem[]> = {
       icon: LayoutDashboard,
     },
     { label: "Students", href: "/controller/students", icon: Users },
+    { label: "Cycles & Rounds", href: "/controller/cycles", icon: RefreshCw },
     {
-      label: "Statistics & Structure",
-      href: "/controller/statistics",
+      label: "Enroll Students",
+      href: "/controller/enroll",
       icon: ClipboardList,
     },
+    { label: "Assign Roles", href: "/controller/assign", icon: Users },
     {
-      label: "Auto-Grading & Questions",
+      label: "Statistics",
+      href: "/controller/statistics",
+      icon: TrendingUp,
+    },
+    {
+      label: "Auto-Grading",
       href: "/controller/questions-grading",
       icon: FileText,
     },
@@ -49,43 +60,41 @@ const navByRole: Record<AccountRole, NavItem[]> = {
       href: "/controller/reports",
       icon: History,
     },
-    {
-      label: "Enroll Students",
-      href: "/controller/enroll",
-      icon: ClipboardList,
-    },
-    { label: "Assign Roles", href: "/controller/assign", icon: ClipboardList },
-    { label: "Cycles", href: "/controller/cycles", icon: RefreshCw },
   ],
   assessor: [
-    { label: "Students", href: "/assessor/students", icon: Users },
+    { label: "Dashboard", href: "/assessor/students", icon: LayoutDashboard },
+    { label: "Competencies", href: "/assessor/competencies", icon: BookOpen },
+    { label: "Submissions", href: "/assessor/submissions", icon: FileText },
     {
       label: "Auto-Grading",
       href: "/assessor/automated-grading",
-      icon: FileText,
+      icon: CheckCircle2,
     },
     {
-      label: "Reports & Integrity",
+      label: "Reports",
       href: "/assessor/reports",
       icon: History,
     },
-    { label: "Competencies", href: "/assessor/competencies", icon: BookOpen },
-    { label: "Submissions", href: "/assessor/submissions", icon: FileText },
   ],
   verifier: [
-    { label: "Monitor", href: "/verifier/results", icon: ClipboardList },
-    {
-      label: "Reports & Integrity",
-      href: "/verifier/reports",
-      icon: History,
-    },
+    { label: "Dashboard", href: "/verifier/results", icon: LayoutDashboard },
     { label: "Competencies", href: "/verifier/competencies", icon: BookOpen },
-    { label: "Send Report", href: "/verifier/report", icon: Send },
     { label: "Activity Log", href: "/verifier/log", icon: History },
+    { label: "Send Report", href: "/verifier/report", icon: Send },
+    {
+      label: "Reports",
+      href: "/verifier/reports",
+      icon: FileText,
+    },
   ],
   student: [
-    { label: "Student Dashboard", href: "/dashboard", icon: LayoutDashboard },
-    { label: "Competencies & Grades", href: "/dashboard", icon: BookOpen },
+    { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+    { label: "My Competencies", href: "/dashboard?tab=competencies", icon: BookOpen },
+    { label: "My Assessments", href: "/dashboard?tab=assessments", icon: ClipboardList },
+    { label: "My Results", href: "/dashboard?tab=results", icon: Award },
+    { label: "My Progress", href: "/dashboard?tab=progress", icon: TrendingUp },
+    { label: "Notifications", href: "/dashboard?tab=notifications", icon: Bell },
+    { label: "My Profile", href: "/dashboard?tab=profile", icon: User },
   ],
 };
 
@@ -98,16 +107,16 @@ export function RoleSidebar({ isOpen = true, onClose }: RoleSidebarProps) {
   const navigate = useNavigate();
   const location = useLocation();
   const pathname = location.pathname;
-  const router = { push: (path: string) => navigate(path) };
+  const currentSearch = location.search;
   const { user, roleContext, logout } = useAuth();
 
   const handleLogout = () => {
     logout();
-    router.push("/");
+    navigate("/");
   };
 
   const handleNavClick = (href: string) => {
-    router.push(href);
+    navigate(href);
     onClose?.();
   };
 
@@ -133,6 +142,17 @@ export function RoleSidebar({ isOpen = true, onClose }: RoleSidebarProps) {
     student: "Student",
   };
 
+  const isItemActive = (href: string) => {
+    if (href.includes("?")) {
+      const [path, search] = href.split("?");
+      return pathname === path && currentSearch === `?${search}`;
+    }
+    if (href === "/dashboard") {
+      return pathname === "/dashboard" && (!currentSearch || currentSearch === "" || currentSearch === "?tab=overview");
+    }
+    return pathname === href || (href !== "/" && pathname.startsWith(href + "/"));
+  };
+
   return (
     <>
       {/* Mobile Backdrop */}
@@ -143,113 +163,105 @@ export function RoleSidebar({ isOpen = true, onClose }: RoleSidebarProps) {
         />
       )}
 
-      {/* Modern Sidebar */}
+      {/* Modern Sidebar Inspired by Elsewedy Dashboard */}
       <aside
         className={cn(
-          "fixed lg:static inset-y-0 left-0 z-50 w-72 bg-white dark:bg-[#0c0c11] text-slate-800 dark:text-neutral-200 flex flex-col h-screen border-r border-slate-200/90 dark:border-white/10 transition-transform duration-300 ease-in-out shadow-lg lg:shadow-none",
+          "fixed lg:static inset-y-0 left-0 z-50 w-64 bg-white dark:bg-[#0d0f17] text-slate-800 dark:text-neutral-200 flex flex-col h-screen border-r border-slate-100 dark:border-white/10 transition-transform duration-300 ease-in-out shadow-lg lg:shadow-none select-none",
           isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
         )}
       >
         {/* Brand Header */}
-        <div className="p-5 border-b border-slate-100 dark:border-white/5 flex items-center justify-between">
-          <Link to="/" className="flex items-center gap-2 group">
-            <div className="w-36">
-              <img
-                src="/elsewedy-logo.png"
-                alt="Elsewedy Logo"
-                width={160}
-                height={55}
-                className="w-full h-auto object-contain filter brightness-100 dark:brightness-110 drop-shadow-sm"
-              />
+        <div className="pt-7 pb-6 px-6 flex items-center justify-between">
+          <div className="flex items-center gap-3.5">
+            <img
+              src="/elsewedy-emblem.png"
+              alt="Elsewedy Logo"
+              className="w-10 h-10 object-contain drop-shadow-sm shrink-0"
+            />
+            <div className="flex flex-col leading-tight">
+              <span className="text-[#e21836] font-extrabold text-[19px] tracking-tight">
+                Elsewedy
+              </span>
+              <span className="text-[#e21836] font-extrabold text-[19px] tracking-tight">
+                Dashboard
+              </span>
             </div>
-          </Link>
+          </div>
 
           {/* Close button on mobile */}
           <button
             onClick={onClose}
-            className="lg:hidden p-2 text-slate-400 hover:text-slate-700 dark:hover:text-white rounded-xl transition-colors cursor-pointer"
+            className="lg:hidden p-1.5 text-slate-400 hover:text-slate-700 dark:hover:text-white rounded-lg transition-colors cursor-pointer"
             aria-label="Close menu"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* User Card */}
-        <div className="p-4 mx-3 my-3 rounded-2xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200/80 dark:border-white/5">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-[#c8102e] to-[#e8192f] text-white font-bold text-sm flex items-center justify-center shadow-sm shrink-0">
+        {/* User Card Pill */}
+        <div className="px-5 mb-3">
+          <div className="px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-white/[0.04] border border-slate-100 dark:border-white/5 flex items-center gap-2.5">
+            <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-[#c8102e] to-[#e21836] text-white font-bold text-xs flex items-center justify-center shrink-0">
               {(user?.fullName || "E").charAt(0).toUpperCase()}
             </div>
             <div className="min-w-0 flex-1">
-              <p className="font-bold text-xs text-slate-900 dark:text-white truncate">
-                {user?.fullName || "Staff Member"}
+              <p className="font-semibold text-xs text-slate-900 dark:text-white truncate">
+                {user?.fullName || "Assessment Staff"}
               </p>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-[#c8102e]/10 text-[#c8102e] dark:text-[#ff4d6a] border border-[#c8102e]/20">
-                  <Shield className="w-3 h-3" />
+              <div className="flex items-center gap-1 mt-0.5">
+                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded text-[9px] font-bold uppercase tracking-wider bg-[#e21836]/10 text-[#e21836] dark:text-[#ff4d6a]">
+                  <Shield className="w-2.5 h-2.5" />
                   {roleLabel[effectiveRole]}
                 </span>
                 {roleContext?.classGroup && (
-                  <span className="text-[10px] font-semibold text-slate-500 dark:text-neutral-400 bg-slate-200 dark:bg-white/10 px-1.5 py-0.5 rounded-md">
-                    Class {roleContext.classGroup}
+                  <span className="text-[9px] text-slate-500 font-medium">
+                    {roleContext.classGroup}
                   </span>
                 )}
               </div>
             </div>
           </div>
-
-          {roleContext?.cycleName && (
-            <div className="mt-2.5 pt-2 border-t border-slate-200/60 dark:border-white/5 text-[10px] text-slate-500 dark:text-neutral-400 font-mono truncate">
-              CYCLE: <span className="text-slate-700 dark:text-neutral-200 font-semibold">{roleContext.cycleName}</span>
-            </div>
-          )}
         </div>
 
         {/* Navigation Items */}
-        <nav className="flex-1 px-3 py-2 space-y-1 overflow-y-auto">
-          <div className="px-3 py-1.5 text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-neutral-500">
-            Menu Navigation
-          </div>
+        <nav className="flex-1 px-4 space-y-1.5 overflow-y-auto pt-1">
           {navItems.map((item) => {
             const Icon = item.icon;
-            const isActive =
-              pathname === item.href || pathname.startsWith(item.href + "/");
+            const active = isItemActive(item.href);
+
             return (
               <button
                 key={item.href}
                 onClick={() => handleNavClick(item.href)}
                 className={cn(
-                  "w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-all duration-150 font-semibold text-xs cursor-pointer group",
-                  isActive
-                    ? "bg-[#c8102e] text-white shadow-[0_4px_16px_rgba(200,16,46,0.25)] font-bold"
-                    : "text-slate-600 dark:text-neutral-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-white/5",
+                  "w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl transition-all duration-200 font-semibold text-[13px] text-left cursor-pointer",
+                  active
+                    ? "bg-[#e21836] text-white shadow-md shadow-[#e21836]/25 font-bold"
+                    : "text-slate-600 dark:text-neutral-300 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100/70 dark:hover:bg-white/5",
                 )}
               >
-                <div className="flex items-center gap-3">
-                  <Icon
-                    className={cn(
-                      "w-4 h-4 shrink-0 transition-transform group-hover:scale-105",
-                      isActive ? "text-white" : "text-slate-400 dark:text-neutral-400 group-hover:text-slate-700 dark:group-hover:text-white",
-                    )}
-                  />
-                  <span>{item.label}</span>
-                </div>
-                {isActive && (
-                  <ChevronRight className="w-3.5 h-3.5 opacity-70" />
-                )}
+                <Icon
+                  className={cn(
+                    "w-5 h-5 shrink-0 transition-transform",
+                    active
+                      ? "text-white"
+                      : "text-slate-500 dark:text-neutral-400 group-hover:text-slate-800",
+                  )}
+                />
+                <span className="truncate">{item.label}</span>
               </button>
             );
           })}
         </nav>
 
         {/* Footer Logout */}
-        <div className="p-3 border-t border-slate-100 dark:border-white/5">
+        <div className="p-4 border-t border-slate-100 dark:border-white/10 mt-auto">
           <button
             onClick={handleLogout}
-            className="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors font-semibold text-xs cursor-pointer"
+            className="w-full flex items-center gap-3.5 px-4 py-3 rounded-2xl text-[#e21836] hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors font-semibold text-[14px] cursor-pointer"
           >
-            <LogOut className="w-4 h-4 shrink-0" />
-            Sign Out
+            <LogOut className="w-5 h-5 shrink-0 text-[#e21836]" />
+            <span>Log Out</span>
           </button>
         </div>
       </aside>

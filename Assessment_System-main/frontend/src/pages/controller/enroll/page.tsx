@@ -358,7 +358,7 @@ export default function EnrollPage() {
                         )}
                       </div>
                       <p className="text-xs text-slate-500 dark:text-neutral-400 font-mono mt-0.5 truncate">
-                        {student.email} · ID: {student.nationalId}
+                        {student.email}
                       </p>
                     </div>
 

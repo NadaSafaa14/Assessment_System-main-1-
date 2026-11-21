@@ -1,1534 +1,746 @@
 "use client";
 
-import React, { useState, useMemo, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import React, { useState, useMemo } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   Award,
   BookOpen,
   Calendar,
   CheckCircle2,
   Clock,
-  Download,
   ExternalLink,
   GraduationCap,
   Layers,
-  LogOut,
   Mail,
-  Phone,
-  Printer,
-  Search,
   ShieldCheck,
-  Sparkles,
   User,
-  Building2,
-  Briefcase,
   AlertCircle,
-  ChevronRight,
-  Filter,
-  Check,
   FileText,
-  BadgeCheck,
-  MapPin,
   TrendingUp,
-  Cpu,
-  Flame,
-  ArrowUpRight,
-  Info,
-  ChevronDown,
-  BarChart3,
   Activity,
   Target,
-  FileCheck,
+  Sparkles,
+  ClipboardList,
+  Bell,
+  Check,
+  ChevronRight,
+  LayoutDashboard,
 } from "lucide-react";
-
-import {
-  ResponsiveContainer,
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-  Cell,
-  RadarChart,
-  Radar,
-  PolarGrid,
-  PolarAngleAxis,
-  PolarRadiusAxis,
-} from "recharts";
-
+import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { useAuth } from "@/lib/auth-context";
-import { useStudents } from "@/hooks/use-api";
+import { useApiQuery } from "@/hooks/use-api";
+import { api, type CompetencyResult, type Student, type CourseRoundAssignment } from "@/lib/api-client";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from "@/components/ui/dialog";
-import {
-  ALL_STUDENT_DOSSIERS,
-  getStudentDossier,
-  type StudentDossier,
-  type StudentCompetencyDetail,
-} from "@/lib/student-dossier-data";
+import { Card } from "@/components/ui/card";
 
 export default function StudentDashboardPage() {
-  const navigate = useNavigate();
-  const router = {
-    push: (p: string) => navigate(p),
-    replace: (p: string) => navigate(p, { replace: true }),
-    back: () => navigate(-1),
-  };
-  const { user, logout } = useAuth();
-  const { data: apiStudents, isLoading: isStudentsLoading } = useStudents();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const activeTab = searchParams.get("tab") || "overview";
+  const { user } = useAuth();
 
-  // Load real students from database
-  const availableStudents = useMemo(() => {
-    return apiStudents || [];
-  }, [apiStudents]);
+  const studentAccountId = user?.accountId || 0;
 
-  // Selected student state (defaults to logged-in user or first active student)
-  const [selectedStudentId, setSelectedStudentId] = useState<number>(user?.accountId || 6);
-  const [studentSearchQuery, setStudentSearchQuery] = useState("");
-  const [isSelectorOpen, setIsSelectorOpen] = useState(false);
+  // 1. Fetch student's profile from database
+  const { data: studentProfile, isLoading: loadingProfile } = useApiQuery<Student | null>(
+    () => (studentAccountId ? api.students.getById(studentAccountId) : Promise.resolve(null)),
+    [studentAccountId]
+  );
 
-  // Competency filter and selected tab
-  const [activeTab, setActiveTab] = useState<"overview" | "competencies" | "schedule" | "transcript" | "profile">("overview");
-  const [competencyStatusFilter, setCompetencyStatusFilter] = useState<"ALL" | "PASSED" | "IN_PROGRESS" | "UPCOMING">("ALL");
+  // 2. Fetch student's official graded competency results
+  const { data: competencyResults, isLoading: loadingResults } = useApiQuery<CompetencyResult[]>(
+    () => (studentAccountId ? api.competencyResults.getAll({ studentId: studentAccountId }) : Promise.resolve([])),
+    [studentAccountId]
+  );
 
-  // Selected competency for inspection modal
-  const [inspectedCompetency, setInspectedCompetency] = useState<StudentCompetencyDetail | null>(null);
+  // 3. Fetch courses/competencies catalog
+  const { data: courses } = useApiQuery(() => api.courses.getAll(), []);
 
-  // Sync with logged-in user if their email or accountId matches
-  useEffect(() => {
-    if (user?.email) {
-      const match = availableStudents.find(
-        (s) => s.email?.toLowerCase() === user.email?.toLowerCase()
-      );
-      if (match) {
-        setSelectedStudentId(match.id);
-      }
-    }
-  }, [user, availableStudents]);
+  // 4. Fetch assignments
+  const { data: assignments } = useApiQuery<CourseRoundAssignment[]>(() => api.courseRoundAssignments.getAll(), []);
 
-  // Retrieve or generate dossier
-  const activeDossier: StudentDossier = useMemo(() => {
-    const rawStudent = availableStudents.find((s) => s.id === selectedStudentId);
-    return getStudentDossier(selectedStudentId, rawStudent);
-  }, [selectedStudentId, availableStudents]);
+  // Compute stats
+  const results = competencyResults || [];
+  const passedCount = results.filter(
+    (r) =>
+      r.resultStatusName?.toLowerCase() === "passed" ||
+      r.resultStatusName?.toLowerCase() === "pass" ||
+      r.resultStatusId === 70 ||
+      r.resultStatusId === 7
+  ).length;
 
-  // Filtered competencies
-  const displayedCompetencies = useMemo(() => {
-    if (competencyStatusFilter === "ALL") return activeDossier.competencies;
-    if (competencyStatusFilter === "PASSED") {
-      return activeDossier.competencies.filter((c) => c.status.startsWith("Passed"));
-    }
-    if (competencyStatusFilter === "IN_PROGRESS") {
-      return activeDossier.competencies.filter((c) => c.status === "In Progress");
-    }
-    if (competencyStatusFilter === "UPCOMING") {
-      return activeDossier.competencies.filter((c) => c.status === "Upcoming");
-    }
-    return activeDossier.competencies;
-  }, [activeDossier, competencyStatusFilter]);
+  const totalEvaluated = results.length;
+  const averagePercentage =
+    totalEvaluated > 0
+      ? Math.round(
+          results.reduce((acc, curr) => {
+            const p =
+              curr.scorePercentage ??
+              (curr.maxScore && curr.totalScore ? (curr.totalScore / curr.maxScore) * 100 : 0);
+            return acc + p;
+          }, 0) / totalEvaluated
+        )
+      : 0;
 
-  // Upcoming scheduled exams
-  const upcomingExams = useMemo(() => {
-    return activeDossier.competencies.filter((c) => c.status === "Upcoming");
-  }, [activeDossier]);
+  // Chart data
+  const chartData = useMemo(() => {
+    return results.map((r) => {
+      const score =
+        r.scorePercentage ??
+        (currMaxScore(r) ? Math.round(((r.totalScore || 0) / currMaxScore(r)) * 100) : 0);
+      return {
+        name: r.courseName || `Course #${r.courseId}`,
+        score: Math.min(100, Math.max(0, score)),
+        passing: 80,
+      };
+    });
+  }, [results]);
 
-  // Chart dataset: Competency performance vs threshold
-  const chartPerformanceData = useMemo(() => {
-    return activeDossier.competencies
-      .filter((c) => c.score !== undefined)
-      .map((c) => ({
-        code: c.code.replace("COMP-", ""),
-        name: c.nameEn,
-        score: c.score || 0,
-        passingThreshold: 75,
-      }));
-  }, [activeDossier]);
+  function currMaxScore(r: CompetencyResult) {
+    return r.maxScore && r.maxScore > 0 ? r.maxScore : 100;
+  }
 
-  // Radar dataset: 5 Core Competency Pillars with Institutional Benchmark
-  const radarData = useMemo(() => {
-    return [
-      { pillar: "Practical Coding", score: 96, benchmark: 82, fullMark: 100 },
-      { pillar: "Architecture & Design", score: 92, benchmark: 78, fullMark: 100 },
-      { pillar: "Industrial Safety (IEC)", score: 98, benchmark: 86, fullMark: 100 },
-      { pillar: "Documentation & QA", score: 91, benchmark: 75, fullMark: 100 },
-      { pillar: "Hardware Interfacing", score: 95, benchmark: 80, fullMark: 100 },
-    ];
-  }, []);
+  const studentName =
+    studentProfile?.fullNameEn || user?.fullName || "Candidate Student";
+  const studentEmail = studentProfile?.email || user?.email || "";
+  const className = studentProfile?.className || "Class 1-A (Software Systems)";
 
-  // Search filtered student selector list
-  const filteredStudentsList = useMemo(() => {
-    if (!studentSearchQuery.trim()) return availableStudents;
-    const q = studentSearchQuery.toLowerCase();
-    return availableStudents.filter(
-      (s) =>
-        s.fullNameEn?.toLowerCase().includes(q) ||
-        s.email?.toLowerCase().includes(q) ||
-        s.nationalId?.includes(q) ||
-        s.id.toString() === q
-    );
-  }, [availableStudents, studentSearchQuery]);
-
-  const initials = activeDossier.fullNameEn
-    .split(" ")
-    .filter(Boolean)
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
-
-  const handlePrint = () => {
-    window.print();
+  const setTab = (tab: string) => {
+    setSearchParams({ tab });
   };
 
   return (
-    <div className="min-h-screen bg-slate-50/70 dark:bg-[#0b0c10] text-slate-900 dark:text-neutral-100 transition-colors duration-300 font-sans pb-16">
-      {/* ============================================================== */}
-      {/* TOP NAVIGATION & CANDIDATE SELECTOR BAR                        */}
-      {/* ============================================================== */}
-      <header className="sticky top-0 z-40 bg-white/90 dark:bg-[#0f1015]/90 backdrop-blur-md border-b border-slate-200/80 dark:border-white/10 px-4 sm:px-8 py-3.5 shadow-sm">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row md:items-center justify-between gap-3">
-          {/* Brand & Portal Label */}
+    <div className="space-y-6 animate-in fade-in-50 duration-300">
+      {/* Top Banner / Student Greeting */}
+      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-r from-slate-900 via-slate-800 to-[#1e1b4b] text-white p-6 sm:p-8 shadow-xl border border-white/10">
+        <div className="absolute top-0 right-0 -mt-10 -mr-10 w-64 h-64 bg-red-600/10 rounded-full blur-3xl pointer-events-none" />
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="space-y-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 border border-white/15 text-xs font-semibold backdrop-blur-md">
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>Assessment Portal · Official Student Portal</span>
+            </div>
+            <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
+              Welcome back, <span className="text-[#ff4d6a]">{studentName}</span>
+            </h1>
+            <p className="text-slate-300 text-xs sm:text-sm font-medium">
+              Enrolled in <span className="text-white font-semibold">{className}</span> · Academic Year 2026/2027
+            </p>
+          </div>
+
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-[#c8102e] flex items-center justify-center text-white font-black text-xl shadow-md shadow-[#c8102e]/20">
-              S
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-extrabold tracking-tight text-slate-900 dark:text-white text-base sm:text-lg">
-                  ELSEWEDY
-                </span>
-                <span className="text-xs px-2 py-0.5 rounded-md font-semibold bg-[#c8102e]/10 text-[#c8102e] border border-[#c8102e]/20">
-                  Student Portal
-                </span>
+            <div className="px-4 py-2 rounded-2xl bg-white/10 backdrop-blur-md border border-white/10 flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-[#e21836] flex items-center justify-center font-bold text-white text-base shadow-sm">
+                {averagePercentage}%
               </div>
-              <p className="text-[11px] text-slate-500 dark:text-neutral-400 font-medium">
-                Elsewedy Technical Academy (STA) • Competency Assessment Dashboard
-              </p>
-            </div>
-          </div>
-
-          {/* Quick Actions & Candidate Selector */}
-          <div className="flex items-center gap-2.5 flex-wrap">
-            {/* Student Directory Switcher */}
-            <div className="relative">
-              <button
-                onClick={() => setIsSelectorOpen(!isSelectorOpen)}
-                className="flex items-center gap-2.5 px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-white/5 dark:hover:bg-white/10 border border-slate-200 dark:border-white/10 text-xs font-semibold text-slate-800 dark:text-neutral-200 transition-all shadow-sm"
-              >
-                <div className="w-5 h-5 rounded-full bg-[#c8102e] text-white text-[10px] font-bold flex items-center justify-center">
-                  {initials}
-                </div>
-                <div className="text-left hidden sm:block">
-                  <div className="leading-none font-bold text-slate-900 dark:text-white">
-                    {activeDossier.fullNameEn.split(" ")[0]} ({activeDossier.code})
-                  </div>
-                </div>
-                <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-              </button>
-
-              {/* Dropdown Menu */}
-              <AnimatePresence>
-                {isSelectorOpen && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 6, scale: 0.98 }}
-                    animate={{ opacity: 1, y: 0, scale: 1 }}
-                    exit={{ opacity: 0, y: 6, scale: 0.98 }}
-                    transition={{ duration: 0.15 }}
-                    className="absolute right-0 mt-2 w-80 sm:w-96 rounded-2xl bg-white dark:bg-[#14151c] border border-slate-200 dark:border-white/15 shadow-2xl p-3 z-50"
-                  >
-                    <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-100 dark:border-white/10">
-                      <span className="text-xs font-bold text-slate-700 dark:text-neutral-300 flex items-center gap-1.5">
-                        <User className="w-3.5 h-3.5 text-[#c8102e]" />
-                        Select Candidate Profile
-                      </span>
-                      <span className="text-[10px] text-slate-400">
-                        {availableStudents.length} Registered Students
-                      </span>
-                    </div>
-
-                    <div className="relative mb-2">
-                      <Search className="w-3.5 h-3.5 absolute left-2.5 top-2.5 text-slate-400" />
-                      <input
-                        type="text"
-                        placeholder="Search by name, national ID..."
-                        value={studentSearchQuery}
-                        onChange={(e) => setStudentSearchQuery(e.target.value)}
-                        className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-white/10 text-slate-800 dark:text-neutral-200 focus:outline-none focus:ring-1 focus:ring-[#c8102e]"
-                      />
-                    </div>
-
-                    <div className="max-h-60 overflow-y-auto space-y-1 pr-1 custom-scrollbar">
-                      {filteredStudentsList.map((st) => {
-                        const isSelected = st.id === selectedStudentId;
-                        return (
-                          <button
-                            key={st.id}
-                            onClick={() => {
-                              setSelectedStudentId(st.id);
-                              setIsSelectorOpen(false);
-                            }}
-                            className={`w-full text-left p-2 rounded-xl text-xs flex items-center justify-between transition-colors ${
-                              isSelected
-                                ? "bg-[#c8102e]/10 text-[#c8102e] font-bold border border-[#c8102e]/30"
-                                : "hover:bg-slate-50 dark:hover:bg-white/5 text-slate-700 dark:text-neutral-300"
-                            }`}
-                          >
-                            <div className="flex items-center gap-2">
-                              <div
-                                className={`w-6 h-6 rounded-lg text-[10px] font-bold flex items-center justify-center shrink-0 ${
-                                  isSelected
-                                    ? "bg-[#c8102e] text-white"
-                                    : "bg-slate-200 dark:bg-white/10 text-slate-700 dark:text-neutral-300"
-                                }`}
-                              >
-                                {st.fullNameEn.slice(0, 1)}
-                              </div>
-                              <div className="truncate">
-                                <div className="truncate font-semibold">{st.fullNameEn}</div>
-                                <div className="text-[10px] text-slate-400 truncate font-normal">
-                                  ID: {st.id} • {st.email}
-                                </div>
-                              </div>
-                            </div>
-                            {isSelected && <Check className="w-3.5 h-3.5 text-[#c8102e] shrink-0" />}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-
-            {/* Print Official Dossier */}
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handlePrint}
-              className="h-8 text-xs font-semibold gap-1.5 rounded-xl border-slate-200 dark:border-white/10 hover:bg-slate-100 dark:hover:bg-white/10"
-            >
-              <Printer className="w-3.5 h-3.5 text-slate-600 dark:text-neutral-300" />
-              <span className="hidden sm:inline">Print Report</span>
-            </Button>
-
-            {/* Dark / Light Mode Switcher */}
-            <ThemeToggle />
-
-            {/* Logout */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                logout();
-                router.push("/login");
-              }}
-              className="h-8 text-xs font-semibold gap-1 text-red-600 hover:text-red-700 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-xl"
-            >
-              <LogOut className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">Logout</span>
-            </Button>
-          </div>
-        </div>
-      </header>
-
-      {/* ============================================================== */}
-      {/* CANDIDATE PROFILE HERO HEADER (Leader Badge Removed)           */}
-      {/* ============================================================== */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-8 pt-6 space-y-6">
-        <div className="relative rounded-3xl overflow-hidden bg-gradient-to-br from-slate-900 via-[#161722] to-[#250d12] text-white p-6 sm:p-8 shadow-2xl border border-slate-800/80">
-          {/* Subtle Ambient Orbs */}
-          <div className="absolute -top-32 -right-32 w-96 h-96 rounded-full bg-[#c8102e]/25 blur-[120px] pointer-events-none" />
-          <div className="absolute -bottom-24 left-1/3 w-80 h-80 rounded-full bg-[#e8192f]/15 blur-[100px] pointer-events-none" />
-
-          <div className="relative z-10 flex flex-col lg:flex-row items-start lg:items-center justify-between gap-6">
-            {/* Left: Avatar & Candidate Info */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
-              <div className="relative">
-                {/* Clean Avatar without Leader Badge */}
-                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-2xl bg-gradient-to-tr from-[#c8102e] to-[#ff4d6a] text-white font-black text-3xl flex items-center justify-center shadow-xl border-2 border-white/20">
-                  {initials}
-                </div>
-                <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-emerald-500 border-2 border-slate-900" title="Active Candidate" />
-              </div>
-
-              <div className="space-y-1.5">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-xl sm:text-2xl font-black tracking-tight text-white">
-                    {activeDossier.fullNameEn}
-                  </h1>
-                  <span className="text-xs px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-semibold border border-emerald-500/30">
-                    Active Student
-                  </span>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-3 text-xs text-slate-300 font-medium">
-                  <span className="flex items-center gap-1 font-mono text-[#ff4d6a] font-bold">
-                    <GraduationCap className="w-3.5 h-3.5" /> {activeDossier.code}
-                  </span>
-                  <span>•</span>
-                  <span className="flex items-center gap-1 text-slate-300">
-                    <User className="w-3.5 h-3.5" /> NID: {activeDossier.nationalId}
-                  </span>
-                  <span>•</span>
-                  <span className="flex items-center gap-1 text-emerald-400 font-semibold">
-                    <BadgeCheck className="w-3.5 h-3.5" /> {activeDossier.verificationStatus}
-                  </span>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2 pt-1 text-xs text-slate-300">
-                  <div className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 flex items-center gap-1.5">
-                    <Building2 className="w-3.5 h-3.5 text-[#ff4d6a]" />
-                    <span>{activeDossier.departmentEn}</span>
-                  </div>
-                  <div className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 flex items-center gap-1.5">
-                    <Briefcase className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Cohort: {activeDossier.cohort}</span>
-                  </div>
-                  <div className="px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-blue-400" />
-                    <span>{activeDossier.factoryEn}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Right: Academic Performance Highlights */}
-            <div className="flex flex-row lg:flex-col items-center lg:items-end justify-between w-full lg:w-auto gap-3 pt-3 lg:pt-0 border-t lg:border-t-0 border-white/10">
-              <div className="text-left lg:text-right">
-                <div className="text-[11px] font-bold tracking-wider uppercase text-slate-400">
-                  Cumulative Mastery Rate
-                </div>
-                <div className="text-3xl sm:text-4xl font-black text-white flex items-center lg:justify-end gap-2">
-                  <span>{activeDossier.overallPercentage}%</span>
-                  <span className="text-xs font-extrabold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                    GPA {activeDossier.gpa}
-                  </span>
-                </div>
-                <p className="text-[11px] text-slate-400">
-                  Evaluation Standing: <span className="text-[#ff4d6a] font-bold">Distinction with Honors</span>
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-300">
+                  Mastery Rate
+                </p>
+                <p className="text-xs font-bold text-white">
+                  {passedCount} Competencies Passed
                 </p>
               </div>
-
-              <div className="flex items-center gap-2">
-                <Button
-                  size="sm"
-                  onClick={() => setActiveTab("schedule")}
-                  className="bg-[#c8102e] hover:bg-[#a00c24] text-white font-bold text-xs rounded-xl shadow-lg shadow-[#c8102e]/30 gap-1.5"
-                >
-                  <Calendar className="w-3.5 h-3.5" />
-                  <span>Next Exam in {activeDossier.competencies.find(c => c.status === "Upcoming")?.countdownDays || 15}d</span>
-                </Button>
-              </div>
             </div>
+            <ThemeToggle />
           </div>
         </div>
 
-        {/* ============================================================== */}
-        {/* KPI OVERVIEW CARDS                                             */}
-        {/* ============================================================== */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {/* Card 1: Passed Competencies */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#12131a] border border-slate-200/80 dark:border-white/10 shadow-sm">
-            <div className="flex items-center justify-between text-slate-500 dark:text-neutral-400 mb-2">
-              <span className="text-xs font-bold uppercase tracking-wider">Passed Units</span>
-              <div className="w-8 h-8 rounded-xl bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-                <CheckCircle2 className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">
-              {activeDossier.completedCompetenciesCount}
-              <span className="text-sm font-normal text-slate-400 ml-1">
-                / {activeDossier.competencies.length} Units
-              </span>
-            </div>
-            <div className="mt-2 text-[11px] text-emerald-600 dark:text-emerald-400 font-semibold flex items-center gap-1">
-              <span>Standard Met with Quality Sign-off</span>
-            </div>
-          </div>
-
-          {/* Card 2: Current Unit in Assessment */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#12131a] border border-slate-200/80 dark:border-white/10 shadow-sm">
-            <div className="flex items-center justify-between text-slate-500 dark:text-neutral-400 mb-2">
-              <span className="text-xs font-bold uppercase tracking-wider">Active Unit</span>
-              <div className="w-8 h-8 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
-                <Clock className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">
-              {activeDossier.inProgressCompetenciesCount}
-              <span className="text-xs font-bold text-amber-600 dark:text-amber-400 ml-2">
-                (In Assessment)
-              </span>
-            </div>
-            <div className="mt-2 text-[11px] text-slate-500 dark:text-neutral-400 truncate">
-              {activeDossier.competencies.find(c => c.status === "In Progress")?.code || "COMP-IOT-305"} • 89% Milestone
-            </div>
-          </div>
-
-          {/* Card 3: Upcoming Exams */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#12131a] border border-slate-200/80 dark:border-white/10 shadow-sm">
-            <div className="flex items-center justify-between text-slate-500 dark:text-neutral-400 mb-2">
-              <span className="text-xs font-bold uppercase tracking-wider">Upcoming Exams</span>
-              <div className="w-8 h-8 rounded-xl bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
-                <Calendar className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">
-              {activeDossier.upcomingCompetenciesCount}
-              <span className="text-xs font-bold text-blue-600 dark:text-blue-400 ml-2">
-                Scheduled
-              </span>
-            </div>
-            <div className="mt-2 text-[11px] text-blue-600 dark:text-blue-400 font-semibold">
-              Nearest: Nov 26, 2026
-            </div>
-          </div>
-
-          {/* Card 4: Field & Industrial Attendance */}
-          <div className="p-4 sm:p-5 rounded-2xl bg-white dark:bg-[#12131a] border border-slate-200/80 dark:border-white/10 shadow-sm">
-            <div className="flex items-center justify-between text-slate-500 dark:text-neutral-400 mb-2">
-              <span className="text-xs font-bold uppercase tracking-wider">Plant Attendance</span>
-              <div className="w-8 h-8 rounded-xl bg-[#c8102e]/10 text-[#c8102e] flex items-center justify-center">
-                <TrendingUp className="w-4 h-4" />
-              </div>
-            </div>
-            <div className="text-2xl sm:text-3xl font-black text-slate-900 dark:text-white">
-              {activeDossier.attendanceRate}%
-            </div>
-            <div className="mt-2 text-[11px] text-slate-500 dark:text-neutral-400">
-              Industrial Conduct Score: <span className="font-bold text-slate-900 dark:text-white">{activeDossier.conductScore}/100</span>
-            </div>
-          </div>
+        {/* Tab Shortcuts Bar */}
+        <div className="mt-6 pt-5 border-t border-white/10 flex items-center gap-2 overflow-x-auto no-scrollbar">
+          {[
+            { id: "overview", label: "Dashboard", icon: LayoutDashboard },
+            { id: "competencies", label: "My Competencies", icon: BookOpen },
+            { id: "assessments", label: "My Assessments", icon: ClipboardList },
+            { id: "results", label: "My Results", icon: Award },
+            { id: "progress", label: "My Progress", icon: TrendingUp },
+            { id: "notifications", label: "Notifications", icon: Bell },
+            { id: "profile", label: "My Profile", icon: User },
+          ].map((tab) => {
+            const Icon = tab.icon;
+            const active = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setTab(tab.id)}
+                className={`flex items-center gap-2 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all shrink-0 cursor-pointer ${
+                  active
+                    ? "bg-white text-slate-900 shadow-md font-bold"
+                    : "text-slate-300 hover:text-white hover:bg-white/10"
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                <span>{tab.label}</span>
+              </button>
+            );
+          })}
         </div>
+      </div>
 
-        {/* ============================================================== */}
-        {/* DASHBOARD TAB NAVIGATION BAR                                   */}
-        {/* ============================================================== */}
-        <div className="flex items-center justify-between border-b border-slate-200 dark:border-white/10 pb-1 overflow-x-auto gap-2">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setActiveTab("overview")}
-              className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
-                activeTab === "overview"
-                  ? "bg-[#c8102e] text-white shadow-md shadow-[#c8102e]/20"
-                  : "text-slate-600 dark:text-neutral-300 hover:bg-slate-100 dark:hover:bg-white/5"
-              }`}
-            >
-              <BarChart3 className="w-4 h-4" />
-              <span>Dashboard Analytics</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("competencies")}
-              className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
-                activeTab === "competencies"
-                  ? "bg-[#c8102e] text-white shadow-md shadow-[#c8102e]/20"
-                  : "text-slate-600 dark:text-neutral-300 hover:bg-slate-100 dark:hover:bg-white/5"
-              }`}
-            >
-              <Award className="w-4 h-4" />
-              <span>Competency Matrix ({activeDossier.competencies.length})</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("schedule")}
-              className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
-                activeTab === "schedule"
-                  ? "bg-[#c8102e] text-white shadow-md shadow-[#c8102e]/20"
-                  : "text-slate-600 dark:text-neutral-300 hover:bg-slate-100 dark:hover:bg-white/5"
-              }`}
-            >
-              <Calendar className="w-4 h-4" />
-              <span>Exam Schedule ({upcomingExams.length})</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("transcript")}
-              className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
-                activeTab === "transcript"
-                  ? "bg-[#c8102e] text-white shadow-md shadow-[#c8102e]/20"
-                  : "text-slate-600 dark:text-neutral-300 hover:bg-slate-100 dark:hover:bg-white/5"
-              }`}
-            >
-              <FileCheck className="w-4 h-4" />
-              <span>Academic Transcript</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab("profile")}
-              className={`px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all flex items-center gap-2 whitespace-nowrap ${
-                activeTab === "profile"
-                  ? "bg-[#c8102e] text-white shadow-md shadow-[#c8102e]/20"
-                  : "text-slate-600 dark:text-neutral-300 hover:bg-slate-100 dark:hover:bg-white/5"
-              }`}
-            >
-              <User className="w-4 h-4" />
-              <span>Candidate Dossier</span>
-            </button>
-          </div>
-        </div>
-
-        {/* ============================================================== */}
-        {/* TAB 0: DASHBOARD ANALYTICS & CHARTS (Real Student Dashboard!)  */}
-        {/* ============================================================== */}
-        {activeTab === "overview" && (
-          <div className="space-y-6">
-            {/* Charts Row */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Left 2 Cols: Competency Scores Bar Chart */}
-              <div className="lg:col-span-2 p-6 rounded-3xl bg-white dark:bg-[#12131a] border border-slate-200/80 dark:border-white/10 shadow-sm space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2 border-b border-slate-100 dark:border-white/10">
-                  <div>
-                    <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                      <BarChart3 className="w-4 h-4 text-[#c8102e]" />
-                      Competency Assessment Scores
-                    </h3>
-                    <p className="text-xs text-slate-500 dark:text-neutral-400">
-                      Scores achieved per unit vs minimum passing threshold (75%)
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs">
-                    <span className="flex items-center gap-1.5 font-semibold text-slate-700 dark:text-neutral-300">
-                      <span className="w-3 h-3 rounded-sm bg-[#c8102e] inline-block" /> Earned Score
-                    </span>
-                    <span className="flex items-center gap-1.5 font-semibold text-slate-400">
-                      <span className="w-3 h-0.5 bg-amber-400 inline-block" /> Pass Threshold (75%)
-                    </span>
-                  </div>
+      {/* TAB 1: OVERVIEW */}
+      {activeTab === "overview" && (
+        <div className="space-y-6">
+          {/* Quick Metrics */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card className="p-5 border-slate-100 dark:border-white/5 rounded-2xl bg-white dark:bg-[#12141e] shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  Enrolled Competencies
+                </span>
+                <div className="w-9 h-9 rounded-xl bg-blue-50 dark:bg-blue-500/10 text-blue-600 flex items-center justify-center">
+                  <BookOpen className="w-4 h-4" />
                 </div>
+              </div>
+              <div className="mt-3">
+                <span className="text-2xl font-extrabold text-slate-900 dark:text-white">
+                  {studentProfile?.competencies?.length || (courses ? courses.length : 4)}
+                </span>
+                <p className="text-[11px] text-slate-500 mt-1">Active curriculum modules</p>
+              </div>
+            </Card>
 
-                <div className="h-64 sm:h-72 w-full pt-2">
+            <Card className="p-5 border-slate-100 dark:border-white/5 rounded-2xl bg-white dark:bg-[#12141e] shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  Passed Competencies
+                </span>
+                <div className="w-9 h-9 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 flex items-center justify-center">
+                  <CheckCircle2 className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="mt-3">
+                <span className="text-2xl font-extrabold text-slate-900 dark:text-white">
+                  {passedCount}
+                </span>
+                <p className="text-[11px] text-emerald-600 font-medium mt-1">Verified competency achievements</p>
+              </div>
+            </Card>
+
+            <Card className="p-5 border-slate-100 dark:border-white/5 rounded-2xl bg-white dark:bg-[#12141e] shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  Pending Assessments
+                </span>
+                <div className="w-9 h-9 rounded-xl bg-amber-50 dark:bg-amber-500/10 text-amber-600 flex items-center justify-center">
+                  <Clock className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="mt-3">
+                <span className="text-2xl font-extrabold text-slate-900 dark:text-white">
+                  {Math.max(0, (studentProfile?.competencies?.length || 4) - passedCount)}
+                </span>
+                <p className="text-[11px] text-amber-600 font-medium mt-1">Awaiting evaluation / verification</p>
+              </div>
+            </Card>
+
+            <Card className="p-5 border-slate-100 dark:border-white/5 rounded-2xl bg-white dark:bg-[#12141e] shadow-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                  Average Score
+                </span>
+                <div className="w-9 h-9 rounded-xl bg-purple-50 dark:bg-purple-500/10 text-purple-600 flex items-center justify-center">
+                  <Award className="w-4 h-4" />
+                </div>
+              </div>
+              <div className="mt-3">
+                <span className="text-2xl font-extrabold text-slate-900 dark:text-white">
+                  {averagePercentage}%
+                </span>
+                <p className="text-[11px] text-slate-500 mt-1">Passing threshold: 80%</p>
+              </div>
+            </Card>
+          </div>
+
+          {/* Performance Chart & Recent Results */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <Card className="lg:col-span-2 p-6 border-slate-100 dark:border-white/5 rounded-3xl bg-white dark:bg-[#12141e] shadow-sm">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                    Competency Performance
+                  </h3>
+                  <p className="text-xs text-slate-500">Evaluation score compared against 80% passing threshold</p>
+                </div>
+                <Badge variant="outline" className="text-xs font-semibold text-slate-600 border-slate-200">
+                  Target: 80%
+                </Badge>
+              </div>
+
+              {chartData.length > 0 ? (
+                <div className="h-64 w-full">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartPerformanceData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
+                    <BarChart data={chartData} margin={{ top: 10, right: 10, left: -20, bottom: 20 }}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.15} />
-                      <XAxis dataKey="code" tick={{ fontSize: 11 }} tickLine={false} />
-                      <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} tickLine={false} />
+                      <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} angle={-15} textAnchor="end" />
+                      <YAxis domain={[0, 100]} tick={{ fontSize: 11 }} />
                       <Tooltip
-                        contentStyle={{
-                          backgroundColor: "#18181b",
-                          borderColor: "#27272a",
-                          borderRadius: "12px",
-                          color: "#fff",
-                          fontSize: "12px",
-                        }}
+                        formatter={(val: any) => [`${val}%`, "Score"]}
+                        contentStyle={{ borderRadius: "12px", border: "1px solid rgba(0,0,0,0.1)" }}
                       />
-                      <Bar dataKey="score" fill="#c8102e" radius={[6, 6, 0, 0]} maxBarSize={45}>
-                        {chartPerformanceData.map((entry, index) => (
-                          <Cell
-                            key={`cell-${index}`}
-                            fill={entry.score >= 90 ? "#c8102e" : "#e11d48"}
-                          />
-                        ))}
-                      </Bar>
+                      <Bar dataKey="score" fill="#e21836" radius={[6, 6, 0, 0]} />
                     </BarChart>
                   </ResponsiveContainer>
                 </div>
-              </div>
-
-              {/* Right Col: 4 Evaluation Pillars Radar */}
-              <div className="p-6 rounded-3xl bg-white dark:bg-[#12131a] border border-slate-200/80 dark:border-white/10 shadow-sm space-y-4">
-                <div className="pb-2 border-b border-slate-100 dark:border-white/10 flex items-center justify-between">
-                  <div>
-                    <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                      <Target className="w-4 h-4 text-emerald-500" />
-                      Skill Mastery Pillars
-                    </h3>
-                    <p className="text-xs text-slate-500 dark:text-neutral-400">
-                      Rubric performance index vs. Academy benchmark
-                    </p>
-                  </div>
-                  <Badge className="bg-[#c8102e]/10 text-[#c8102e] border-[#c8102e]/20 text-[10px] font-bold">
-                    STA Certified
-                  </Badge>
+              ) : (
+                <div className="h-64 flex flex-col items-center justify-center text-center p-6 text-slate-400">
+                  <Award className="w-10 h-10 mb-2 opacity-40" />
+                  <p className="text-sm font-semibold">No competency evaluations recorded yet</p>
+                  <p className="text-xs">Your graded assessments will appear here automatically.</p>
                 </div>
+              )}
+            </Card>
 
-                <div className="h-64 sm:h-72 w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <RadarChart data={radarData}>
-                      <PolarGrid opacity={0.25} />
-                      <PolarAngleAxis dataKey="pillar" tick={{ fontSize: 10, fill: "#94a3b8" }} />
-                      <PolarRadiusAxis domain={[0, 100]} tick={false} axisLine={false} />
-                      <Tooltip
-                        contentStyle={{
-                          backgroundColor: "#18181b",
-                          border: "1px solid rgba(255,255,255,0.1)",
-                          borderRadius: "12px",
-                          fontSize: "12px",
-                          color: "#fff",
-                        }}
-                      />
-                      <Radar
-                        name="Candidate Performance"
-                        dataKey="score"
-                        stroke="#c8102e"
-                        strokeWidth={2}
-                        fill="#c8102e"
-                        fillOpacity={0.45}
-                      />
-                      <Radar
-                        name="Academy Benchmark"
-                        dataKey="benchmark"
-                        stroke="#94a3b8"
-                        strokeWidth={1.5}
-                        strokeDasharray="4 4"
-                        fill="#64748b"
-                        fillOpacity={0.15}
-                      />
-                    </RadarChart>
-                  </ResponsiveContainer>
+            {/* Quick Status / Recent Graded Cards */}
+            <Card className="p-6 border-slate-100 dark:border-white/5 rounded-3xl bg-white dark:bg-[#12141e] shadow-sm flex flex-col">
+              <h3 className="text-base font-extrabold text-slate-900 dark:text-white mb-4">
+                Latest Results
+              </h3>
+              {results.length > 0 ? (
+                <div className="space-y-3 flex-1 overflow-y-auto">
+                  {results.slice(0, 4).map((r) => {
+                    const pct =
+                      r.scorePercentage ??
+                      (r.maxScore && r.totalScore ? Math.round((r.totalScore / r.maxScore) * 100) : 0);
+                    const isPass = pct >= 80;
+                    return (
+                      <div
+                        key={r.id}
+                        className="p-3 rounded-2xl bg-slate-50 dark:bg-white/[0.03] border border-slate-100 dark:border-white/5 flex items-center justify-between"
+                      >
+                        <div className="min-w-0 flex-1 mr-3">
+                          <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
+                            {r.courseName || `Course #${r.courseId}`}
+                          </p>
+                          <p className="text-[11px] text-slate-500">
+                            {r.gradedAt ? new Date(r.gradedAt).toLocaleDateString() : "Graded"}
+                          </p>
+                        </div>
+                        <Badge
+                          className={`text-xs font-bold px-2 py-0.5 rounded-lg ${
+                            isPass
+                              ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200"
+                              : "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 border border-red-200"
+                          }`}
+                        >
+                          {pct}% · {isPass ? "Passed" : "Not Passed"}
+                        </Badge>
+                      </div>
+                    );
+                  })}
                 </div>
-
-                {/* Radar Legend */}
-                <div className="flex items-center justify-center gap-6 text-[11px] font-semibold text-slate-500 dark:text-neutral-400 pt-1 border-t border-slate-100 dark:border-white/5">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded-full bg-[#c8102e]" />
-                    <span>Candidate (Avg: 94.4%)</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-3 h-3 rounded-full bg-slate-400" />
-                    <span>Academy Benchmark (Avg: 80%)</span>
-                  </div>
+              ) : (
+                <div className="flex-1 flex flex-col items-center justify-center text-center p-4 text-slate-400">
+                  <Clock className="w-8 h-8 mb-2 opacity-40" />
+                  <p className="text-xs font-semibold">Evaluations in progress</p>
                 </div>
-              </div>
-            </div>
-
-            {/* ============================================================== */}
-            {/* DIGITAL COMPETENCY DOSSIER BADGE & ATTEMPTS TIMELINE           */}
-            {/* ============================================================== */}
-            <div className="p-6 sm:p-8 rounded-3xl bg-gradient-to-br from-slate-950 via-slate-900 to-[#1b0c0f] border border-slate-800 text-white shadow-xl relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-96 h-96 rounded-full bg-[#c8102e]/10 blur-[120px] pointer-events-none" />
-
-              <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6 pb-6 border-b border-white/10">
-                <div className="space-y-1.5">
-                  <div className="flex items-center gap-2">
-                    <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-[#c8102e]/20 text-[#ff4d6a] border border-[#c8102e]/40">
-                      <ShieldCheck className="w-3.5 h-3.5" />
-                      Verified Digital Credential
-                    </span>
-                    <span className="text-xs text-slate-400 font-mono">
-                      STA-CRED-{activeDossier.id}-2026
-                    </span>
-                  </div>
-                  <h3 className="text-xl sm:text-2xl font-black tracking-tight text-white">
-                    Elsewedy Technical Academy Competency Clearance
-                  </h3>
-                  <p className="text-xs sm:text-sm text-slate-300 max-w-2xl leading-relaxed">
-                    Official evaluation record verifying candidate compliance with industrial standards,
-                    practical RTOS implementations, and electrical safety certifications.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-3 shrink-0">
-                  <Button
-                    onClick={handlePrint}
-                    className="h-10 px-5 rounded-xl bg-white hover:bg-slate-100 text-slate-950 font-bold text-xs shadow-md transition-all cursor-pointer"
-                  >
-                    <Printer className="w-3.5 h-3.5 mr-2" />
-                    Print Official Transcript
-                  </Button>
-                </div>
-              </div>
-
-              {/* Attempts Progression Milestone Ribbon */}
-              <div className="mt-6 pt-2">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-4 flex items-center gap-1.5">
-                  <Activity className="w-3.5 h-3.5 text-[#ff4d6a]" />
-                  Interactive Attempts Progression & Audit Verification
-                </h4>
-
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                  <div className="p-4 rounded-2xl bg-white/5 border border-emerald-500/30 backdrop-blur-sm">
-                    <div className="flex items-center justify-between text-xs mb-1.5">
-                      <span className="font-bold text-emerald-400">Attempt A (Initial)</span>
-                      <Badge className="bg-emerald-500/20 text-emerald-300 border-none text-[10px] font-bold">Passed</Badge>
-                    </div>
-                    <p className="text-xl font-black text-white">94% Score</p>
-                    <p className="text-[11px] text-slate-400 mt-1">First-time submission cleared with honors.</p>
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-sm">
-                    <div className="flex items-center justify-between text-xs mb-1.5">
-                      <span className="font-bold text-slate-300">Attempt B (Retake 1)</span>
-                      <span className="text-[10px] font-semibold text-slate-400">Exempt</span>
-                    </div>
-                    <p className="text-xl font-black text-slate-400">N/A</p>
-                    <p className="text-[11px] text-slate-500 mt-1">Not required due to first-attempt mastery.</p>
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-white/5 border border-white/10 backdrop-blur-sm">
-                    <div className="flex items-center justify-between text-xs mb-1.5">
-                      <span className="font-bold text-slate-300">Attempt C (Retake 2)</span>
-                      <span className="text-[10px] font-semibold text-slate-400">Exempt</span>
-                    </div>
-                    <p className="text-xl font-black text-slate-400">N/A</p>
-                    <p className="text-[11px] text-slate-500 mt-1">Candidate met all threshold requirements.</p>
-                  </div>
-
-                  <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 backdrop-blur-sm">
-                    <div className="flex items-center justify-between text-xs mb-1.5">
-                      <span className="font-bold text-emerald-300">QA Verification</span>
-                      <Badge className="bg-emerald-500/30 text-emerald-200 border-none text-[10px] font-bold">Approved</Badge>
-                    </div>
-                    <p className="text-xl font-black text-emerald-400">Certified</p>
-                    <p className="text-[11px] text-emerald-300/80 mt-1">Audit signed by Internal Verifier.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Recent Milestones & Upcoming Deliverables Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Active Milestone Card */}
-              <div className="p-6 rounded-3xl bg-white dark:bg-[#12131a] border border-slate-200/80 dark:border-white/10 shadow-sm space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <Clock className="w-4 h-4 text-amber-500" />
-                    Current Formative Assessment Unit
-                  </h3>
-                  <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30 text-xs font-bold">
-                    89% In-Progress
-                  </Badge>
-                </div>
-
-                <div className="p-4 rounded-2xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200/40 dark:border-amber-900/30 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs font-black text-amber-900 dark:text-amber-300">
-                      COMP-IOT-305
-                    </span>
-                    <span className="text-xs text-amber-800 dark:text-amber-400 font-semibold">
-                      Industrial IoT & Modbus Telemetry
-                    </span>
-                  </div>
-                  <Progress value={89} className="h-2 bg-amber-200 dark:bg-amber-950" />
-                  <p className="text-xs text-slate-600 dark:text-neutral-300">
-                    Candidate has completed MQTT broker integration and RS485 Modbus streaming. Final hardware rig defense review scheduled next week.
-                  </p>
-                  <div className="pt-1 flex items-center justify-between text-xs text-slate-500 dark:text-neutral-400">
-                    <span>Assessor: Eng. Ahmed Tarek</span>
-                    <span>Target Verification: Nov 18, 2026</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Next Exam Countdown Card */}
-              <div className="p-6 rounded-3xl bg-white dark:bg-[#12131a] border border-slate-200/80 dark:border-white/10 shadow-sm space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                    <Calendar className="w-4 h-4 text-blue-500" />
-                    Next Scheduled Evaluation
-                  </h3>
-                  <Badge className="bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30 text-xs font-bold">
-                    15 Days Remaining
-                  </Badge>
-                </div>
-
-                <div className="p-4 rounded-2xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200/40 dark:border-blue-900/30 space-y-2.5">
-                  <div className="flex items-center justify-between">
-                    <span className="font-mono text-xs font-black text-blue-900 dark:text-blue-300">
-                      COMP-CAP-306
-                    </span>
-                    <span className="text-xs text-blue-800 dark:text-blue-400 font-semibold">
-                      Capstone Committee Defense
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-600 dark:text-neutral-300">
-                    Scheduled date: <span className="font-bold text-slate-900 dark:text-white">Thursday, Nov 26, 2026 at 10:00 AM</span>
-                  </p>
-                  <div className="text-xs text-slate-500 dark:text-neutral-400 flex items-center gap-1.5">
-                    <MapPin className="w-3.5 h-3.5 text-blue-500" />
-                    <span>Elsewedy Advanced Robotics Hub - Hall A-102</span>
-                  </div>
-                  <div className="pt-2 flex justify-end">
-                    <Button
-                      size="sm"
-                      onClick={() => setActiveTab("schedule")}
-                      className="h-7 text-xs bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold"
-                    >
-                      View Exam Details & Guidelines
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
+              )}
+              <Button
+                variant="outline"
+                className="w-full mt-4 rounded-xl text-xs font-bold"
+                onClick={() => setTab("results")}
+              >
+                View All Results
+              </Button>
+            </Card>
           </div>
-        )}
+        </div>
+      )}
 
-        {/* ============================================================== */}
-        {/* TAB 1: COMPETENCY MATRIX & UNITS (All in English)              */}
-        {/* ============================================================== */}
-        {activeTab === "competencies" && (
-          <div className="space-y-6">
-            {/* Filter Pills */}
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-1.5">
-                <span className="text-xs font-bold text-slate-500 dark:text-neutral-400 mr-2 flex items-center gap-1">
-                  <Filter className="w-3.5 h-3.5" /> Filter Units:
-                </span>
-                <button
-                  onClick={() => setCompetencyStatusFilter("ALL")}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                    competencyStatusFilter === "ALL"
-                      ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900"
-                      : "bg-slate-100 dark:bg-white/5 text-slate-600 dark:text-neutral-400 hover:bg-slate-200"
-                  }`}
-                >
-                  All Competencies ({activeDossier.competencies.length})
-                </button>
-                <button
-                  onClick={() => setCompetencyStatusFilter("PASSED")}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                    competencyStatusFilter === "PASSED"
-                      ? "bg-emerald-600 text-white"
-                      : "bg-emerald-50 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100"
-                  }`}
-                >
-                  Passed Units ({activeDossier.completedCompetenciesCount})
-                </button>
-                <button
-                  onClick={() => setCompetencyStatusFilter("IN_PROGRESS")}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                    competencyStatusFilter === "IN_PROGRESS"
-                      ? "bg-amber-600 text-white"
-                      : "bg-amber-50 dark:bg-amber-950/20 text-amber-700 dark:text-amber-400 hover:bg-amber-100"
-                  }`}
-                >
-                  In Assessment ({activeDossier.inProgressCompetenciesCount})
-                </button>
-                <button
-                  onClick={() => setCompetencyStatusFilter("UPCOMING")}
-                  className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-                    competencyStatusFilter === "UPCOMING"
-                      ? "bg-blue-600 text-white"
-                      : "bg-blue-50 dark:bg-blue-950/20 text-blue-700 dark:text-blue-400 hover:bg-blue-100"
-                  }`}
-                >
-                  Upcoming Exams ({activeDossier.upcomingCompetenciesCount})
-                </button>
-              </div>
-
-              <div className="text-xs text-slate-400">
-                Click any competency to inspect full rubrics and audit stamps
-              </div>
+      {/* TAB 2: MY COMPETENCIES */}
+      {activeTab === "competencies" && (
+        <div className="space-y-6">
+          <div className="flex items-center justify-between">
+            <div>
+              <h2 className="text-xl font-extrabold text-slate-900 dark:text-white">
+                My Competencies
+              </h2>
+              <p className="text-xs text-slate-500">
+                Official curriculum competencies assigned for technical evaluation
+              </p>
             </div>
+            <Badge className="bg-[#e21836] text-white text-xs font-bold px-3 py-1">
+              {results.length} Evaluated
+            </Badge>
+          </div>
 
-            {/* Competency Cards Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              {displayedCompetencies.map((comp) => {
-                const isPassed = comp.status.startsWith("Passed");
-                const isInProgress = comp.status === "In Progress";
-                const isUpcoming = comp.status === "Upcoming";
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            {courses && courses.length > 0 ? (
+              courses.map((course) => {
+                const evalResult = results.find((r) => r.courseId === course.id);
+                const score = evalResult
+                  ? evalResult.scorePercentage ??
+                    (evalResult.maxScore && evalResult.totalScore
+                      ? Math.round((evalResult.totalScore / evalResult.maxScore) * 100)
+                      : 0)
+                  : null;
+                const isPassed = score !== null && score >= 80;
 
                 return (
-                  <motion.div
-                    key={comp.id}
-                    layout
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.2 }}
-                    onClick={() => setInspectedCompetency(comp)}
-                    className="group cursor-pointer rounded-2xl bg-white dark:bg-[#12131a] border border-slate-200/80 dark:border-white/10 p-5 shadow-sm hover:shadow-xl hover:border-[#c8102e]/40 dark:hover:border-[#c8102e]/50 transition-all flex flex-col justify-between"
+                  <Card
+                    key={course.id}
+                    className="p-5 border-slate-100 dark:border-white/5 rounded-3xl bg-white dark:bg-[#12141e] shadow-sm flex flex-col justify-between"
                   >
                     <div>
-                      {/* Top Badges */}
-                      <div className="flex items-center justify-between gap-2 mb-3">
-                        <span className="font-mono text-xs font-black px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-neutral-300 border border-slate-200 dark:border-white/10">
-                          {comp.code}
+                      <div className="flex items-center justify-between mb-3">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                          Competency #{course.id}
                         </span>
-
-                        {isPassed && (
-                          <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 text-[11px] font-bold">
-                            <CheckCircle2 className="w-3 h-3 mr-1" />
-                            {comp.status === "Passed" ? "Passed (1st Round)" : "Passed (Retake)"}
+                        {score !== null ? (
+                          <Badge
+                            className={`text-[11px] font-bold rounded-lg px-2 py-0.5 ${
+                              isPassed
+                                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200"
+                                : "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400 border border-amber-200"
+                            }`}
+                          >
+                            {isPassed ? "Passed" : "Retake Needed"}
                           </Badge>
-                        )}
-                        {isInProgress && (
-                          <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-400 border-amber-500/30 text-[11px] font-bold animate-pulse">
-                            <Clock className="w-3 h-3 mr-1" />
-                            In Assessment
-                          </Badge>
-                        )}
-                        {isUpcoming && (
-                          <Badge className="bg-blue-500/15 text-blue-700 dark:text-blue-400 border-blue-500/30 text-[11px] font-bold">
-                            <Calendar className="w-3 h-3 mr-1" />
-                            Scheduled Exam
+                        ) : (
+                          <Badge className="bg-slate-100 text-slate-600 dark:bg-white/10 dark:text-neutral-300 text-[11px] font-semibold border-0">
+                            Pending Evaluation
                           </Badge>
                         )}
                       </div>
 
-                      {/* Title */}
-                      <h3 className="text-base font-bold text-slate-900 dark:text-white group-hover:text-[#c8102e] transition-colors leading-snug">
-                        {comp.nameEn}
+                      <h3 className="text-base font-extrabold text-slate-900 dark:text-white line-clamp-1">
+                        {course.title}
                       </h3>
-                      <p className="text-xs text-slate-500 dark:text-neutral-400 mt-1 mb-4">
-                        {comp.categoryEn} • {comp.level}
+                      <p className="text-xs text-slate-500 line-clamp-2 mt-1">
+                        {course.description || "Core technical assessment competency."}
                       </p>
-
-                      {/* Score Highlight */}
-                      {isPassed && (
-                        <div className="p-3 rounded-xl bg-slate-50 dark:bg-white/5 border border-slate-100 dark:border-white/5 mb-4">
-                          <div className="flex items-center justify-between text-xs mb-1">
-                            <span className="text-slate-500 dark:text-neutral-400 font-medium">Earned Score</span>
-                            <span className="font-black text-slate-900 dark:text-white text-sm">
-                              {comp.score} / {comp.maxScore}
-                            </span>
-                          </div>
-                          <Progress value={comp.score || 0} className="h-1.5" />
-                          <div className="flex items-center justify-between text-[10px] text-slate-400 mt-1.5">
-                            <span>Assessed: {comp.assessmentDate}</span>
-                            <span>{comp.attemptsCount === 1 ? "1st Attempt" : "2nd Attempt"}</span>
-                          </div>
-                        </div>
-                      )}
-
-                      {isInProgress && (
-                        <div className="p-3 rounded-xl bg-amber-50/60 dark:bg-amber-950/20 border border-amber-200/50 dark:border-amber-900/30 mb-4">
-                          <div className="flex items-center justify-between text-xs mb-1">
-                            <span className="text-amber-800 dark:text-amber-300 font-bold">Formative Progress</span>
-                            <span className="font-black text-amber-700 dark:text-amber-400 text-sm">
-                              89%
-                            </span>
-                          </div>
-                          <Progress value={89} className="h-1.5 bg-amber-200 dark:bg-amber-950" />
-                          <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-1.5">
-                            Active stage: IoT Sensors & Modbus RS485 Integration
-                          </p>
-                        </div>
-                      )}
-
-                      {isUpcoming && (
-                        <div className="p-3 rounded-xl bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200/50 dark:border-blue-900/30 mb-4">
-                          <div className="flex items-center justify-between text-xs text-blue-800 dark:text-blue-300 font-bold mb-1">
-                            <span className="flex items-center gap-1">
-                              <Calendar className="w-3.5 h-3.5" /> Examination Date
-                            </span>
-                            <span className="font-mono">{comp.assessmentDate}</span>
-                          </div>
-                          <p className="text-[11px] text-blue-700 dark:text-blue-400">
-                            Time: {comp.assessmentTime || "10:00 AM"}
-                          </p>
-                          <div className="mt-2 text-[10px] px-2 py-0.5 rounded bg-blue-200/50 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 font-semibold w-fit">
-                            {comp.countdownDays || 15} days remaining
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Criteria Preview */}
-                      <div className="space-y-1 mb-4">
-                        <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                          Assessed Rubric Criteria:
-                        </span>
-                        {comp.criteria.slice(0, 2).map((crit, idx) => (
-                          <div key={idx} className="flex items-center justify-between text-xs text-slate-600 dark:text-neutral-400">
-                            <span className="truncate pr-2">• {crit.nameEn}</span>
-                            <span className="font-semibold shrink-0">
-                              {isPassed ? `${crit.earned}/${crit.max}` : `${crit.max} pts`}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
                     </div>
 
-                    {/* Card Footer */}
-                    <div className="pt-3 border-t border-slate-100 dark:border-white/5 flex items-center justify-between text-[11px] text-slate-500 dark:text-neutral-400">
-                      <div className="truncate">
-                        <span className="font-bold text-slate-700 dark:text-neutral-300">
-                          {isUpcoming ? "Jury:" : "Assessor:"}
-                        </span>{" "}
-                        {comp.assessorName}
-                      </div>
-                      <ChevronRight className="w-4 h-4 text-slate-400 group-hover:text-[#c8102e] group-hover:translate-x-0.5 transition-all shrink-0" />
+                    <div className="mt-5 pt-4 border-t border-slate-100 dark:border-white/5">
+                      {score !== null ? (
+                        <div className="space-y-1.5">
+                          <div className="flex justify-between text-xs font-bold">
+                            <span className="text-slate-500">Achieved Score</span>
+                            <span className={isPassed ? "text-emerald-600" : "text-amber-600"}>
+                              {score}%
+                            </span>
+                          </div>
+                          <Progress value={score} className="h-2 rounded-full" />
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-xs text-slate-400 font-medium">
+                          <Clock className="w-3.5 h-3.5" />
+                          <span>Assessment scheduled</span>
+                        </div>
+                      )}
                     </div>
-                  </motion.div>
+                  </Card>
                 );
-              })}
-            </div>
+              })
+            ) : (
+              <div className="col-span-full p-8 text-center text-slate-400">
+                <BookOpen className="w-12 h-12 mx-auto mb-2 opacity-30" />
+                <p className="font-semibold text-sm">No competencies available</p>
+              </div>
+            )}
           </div>
-        )}
+        </div>
+      )}
 
-        {/* ============================================================== */}
-        {/* TAB 2: UPCOMING EXAM SCHEDULE & LOGISTICS                      */}
-        {/* ============================================================== */}
-        {activeTab === "schedule" && (
-          <div className="space-y-6">
-            <div className="p-6 rounded-3xl bg-white dark:bg-[#12131a] border border-slate-200/80 dark:border-white/10 shadow-sm">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h2 className="text-lg font-black text-slate-900 dark:text-white flex items-center gap-2">
-                    <Calendar className="w-5 h-5 text-[#c8102e]" />
-                    Upcoming Examination Schedule & Assessment Panels
-                  </h2>
-                  <p className="text-xs text-slate-500 dark:text-neutral-400 mt-1">
-                    Official schedule of remaining competency assessments required for national graduation
-                  </p>
-                </div>
-                <Badge className="bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20 text-xs font-bold">
-                  {upcomingExams.length} Scheduled Evaluations
-                </Badge>
-              </div>
-
-              <div className="space-y-5">
-                {upcomingExams.map((exam) => (
-                  <div
-                    key={exam.id}
-                    className="p-5 sm:p-6 rounded-2xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200 dark:border-white/10 space-y-4 hover:border-blue-400/50 transition-all"
-                  >
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-200 dark:border-white/10">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono text-xs font-black px-2 py-0.5 rounded bg-blue-500/15 text-blue-700 dark:text-blue-400">
-                            {exam.code}
-                          </span>
-                          <span className="text-xs px-2 py-0.5 rounded bg-slate-200 dark:bg-white/10 font-bold text-slate-700 dark:text-neutral-300">
-                            {exam.level}
-                          </span>
-                        </div>
-                        <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white mt-1">
-                          {exam.nameEn}
-                        </h3>
-                        <p className="text-xs text-slate-500 dark:text-neutral-400">
-                          {exam.categoryEn}
-                        </p>
-                      </div>
-
-                      <div className="text-left sm:text-right shrink-0 bg-white dark:bg-black/30 p-3 rounded-xl border border-slate-200 dark:border-white/10">
-                        <div className="text-xs text-slate-400 font-medium">Committee Convening Date</div>
-                        <div className="text-sm font-black text-[#c8102e] flex items-center gap-1.5 mt-0.5">
-                          <Calendar className="w-4 h-4" />
-                          <span>{exam.assessmentDate}</span>
-                        </div>
-                        <div className="text-xs text-slate-500 dark:text-neutral-400 mt-0.5">
-                          {exam.assessmentTime}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                      {/* Location & Hall */}
-                      <div className="p-3 rounded-xl bg-white dark:bg-black/20 border border-slate-100 dark:border-white/5 space-y-1">
-                        <span className="font-bold text-slate-700 dark:text-neutral-300 flex items-center gap-1.5">
-                          <MapPin className="w-3.5 h-3.5 text-[#c8102e]" />
-                          Exam Hall & Venue
-                        </span>
-                        <p className="text-slate-600 dark:text-neutral-400">
-                          {exam.venueEn}
-                        </p>
-                      </div>
-
-                      {/* Evaluation Panel */}
-                      <div className="p-3 rounded-xl bg-white dark:bg-black/20 border border-slate-100 dark:border-white/5 space-y-1">
-                        <span className="font-bold text-slate-700 dark:text-neutral-300 flex items-center gap-1.5">
-                          <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" />
-                          Examination Jury Board
-                        </span>
-                        <p className="text-slate-600 dark:text-neutral-400">
-                          Assessor: <span className="font-semibold text-slate-900 dark:text-white">{exam.assessorName}</span>
-                        </p>
-                        <p className="text-slate-600 dark:text-neutral-400">
-                          Verifier: <span className="font-semibold text-slate-900 dark:text-white">{exam.verifierName}</span>
-                        </p>
-                      </div>
-
-                      {/* Eligibility Status */}
-                      <div className="p-3 rounded-xl bg-white dark:bg-black/20 border border-slate-100 dark:border-white/5 space-y-1">
-                        <span className="font-bold text-slate-700 dark:text-neutral-300 flex items-center gap-1.5">
-                          <BadgeCheck className="w-3.5 h-3.5 text-blue-500" />
-                          Eligibility Status
-                        </span>
-                        <div className="flex items-center gap-2 pt-0.5">
-                          <span className="px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 font-bold text-[11px]">
-                            Cleared for Examination (Eligible)
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-400">
-                          <span className="font-bold text-[#c8102e]">{exam.countdownDays} days remaining</span>
-                        </p>
-                      </div>
-                    </div>
-
-                    {/* Pre-Exam Checklist */}
-                    <div className="p-4 rounded-xl bg-blue-50/50 dark:bg-blue-950/15 border border-blue-200/40 dark:border-blue-900/30 space-y-2">
-                      <span className="text-xs font-bold text-blue-900 dark:text-blue-300 flex items-center gap-1.5">
-                        <Info className="w-3.5 h-3.5" /> Required Pre-Assessment Deliverables & Submission Items:
-                      </span>
-                      <ul className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs text-blue-950 dark:text-blue-200">
-                        {exam.upcomingDeliverables?.map((del, dIdx) => (
-                          <li key={dIdx} className="flex items-start gap-2">
-                            <span className="text-blue-500 font-bold">•</span>
-                            <span>{del}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
+      {/* TAB 3: MY ASSESSMENTS */}
+      {activeTab === "assessments" && (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-xl font-extrabold text-slate-900 dark:text-white">
+              My Assessments
+            </h2>
+            <p className="text-xs text-slate-500">
+              Assigned technical tasks, rubrics, and submission status
+            </p>
           </div>
-        )}
 
-        {/* ============================================================== */}
-        {/* TAB 3: OFFICIAL ACADEMIC TRANSCRIPT                            */}
-        {/* ============================================================== */}
-        {activeTab === "transcript" && (
-          <div className="space-y-6">
-            <div className="p-6 sm:p-8 rounded-3xl bg-white dark:bg-[#12131a] border border-slate-200/80 dark:border-white/10 shadow-sm space-y-6">
-              {/* Transcript Official Header */}
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-6 border-b border-slate-200 dark:border-white/10 gap-4">
-                <div className="flex items-center gap-4">
-                  <div className="w-14 h-14 rounded-2xl bg-[#c8102e] text-white flex items-center justify-center font-black text-2xl shadow-lg">
-                    STA
-                  </div>
-                  <div>
-                    <h2 className="text-lg font-black text-slate-900 dark:text-white uppercase tracking-wider">
-                      Elsewedy Technical Academy (STA)
-                    </h2>
-                    <p className="text-xs text-slate-500 dark:text-neutral-400">
-                      Official Candidate Assessment Transcript & National Competency Record
-                    </p>
-                    <p className="text-[11px] text-slate-400 font-mono">
-                      Document Ref: STA-TRN-2026-{activeDossier.id.toString().padStart(4, "0")}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="text-left sm:text-right text-xs space-y-1">
-                  <div>
-                    <span className="text-slate-400">Candidate:</span>{" "}
-                    <span className="font-bold text-slate-900 dark:text-white">{activeDossier.fullNameEn}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400">National ID:</span>{" "}
-                    <span className="font-mono text-slate-700 dark:text-neutral-300">{activeDossier.nationalId}</span>
-                  </div>
-                  <div>
-                    <span className="text-slate-400">Cohort:</span>{" "}
-                    <span className="font-semibold text-slate-700 dark:text-neutral-300">{activeDossier.cohort}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* Transcript Data Table */}
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-200 dark:border-white/10 bg-slate-50 dark:bg-white/[0.02] text-slate-500 dark:text-neutral-400 font-bold uppercase tracking-wider">
-                      <th className="py-3 px-3">Unit Code</th>
-                      <th className="py-3 px-3">Competency Title</th>
-                      <th className="py-3 px-3">Category</th>
-                      <th className="py-3 px-3 text-center">Attempt</th>
-                      <th className="py-3 px-3 text-center">Score</th>
-                      <th className="py-3 px-3 text-center">Status</th>
-                      <th className="py-3 px-3">Assessor / Verifier</th>
-                      <th className="py-3 px-3">Audit Stamp</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 dark:divide-white/5 font-medium">
-                    {activeDossier.competencies.map((c) => (
-                      <tr key={c.id} className="hover:bg-slate-50/50 dark:hover:bg-white/[0.02] transition-colors">
-                        <td className="py-3.5 px-3 font-mono font-bold text-slate-900 dark:text-white">
-                          {c.code}
+          <Card className="border-slate-100 dark:border-white/5 rounded-3xl bg-white dark:bg-[#12141e] shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-white/[0.02] border-b border-slate-100 dark:border-white/5 text-slate-500 uppercase tracking-wider font-bold">
+                  <tr>
+                    <th className="py-4 px-6">Task Title</th>
+                    <th className="py-4 px-6">Competency</th>
+                    <th className="py-4 px-6">Max Grade</th>
+                    <th className="py-4 px-6">Deadline</th>
+                    <th className="py-4 px-6">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-white/5 font-medium">
+                  {assignments && assignments.length > 0 ? (
+                    assignments.map((asgn) => (
+                      <tr key={asgn.id} className="hover:bg-slate-50/50 dark:hover:bg-white/[0.01]">
+                        <td className="py-4 px-6 font-bold text-slate-900 dark:text-white">
+                          {asgn.title}
                         </td>
-                        <td className="py-3.5 px-3">
-                          <div className="font-bold text-slate-900 dark:text-white">{c.nameEn}</div>
-                          <div className="text-[11px] text-slate-500 dark:text-neutral-400">{c.level}</div>
+                        <td className="py-4 px-6 text-slate-600 dark:text-neutral-300">
+                          {asgn.courseName || `Course #${asgn.courseId}`}
                         </td>
-                        <td className="py-3.5 px-3 text-slate-600 dark:text-neutral-300">
-                          {c.categoryEn}
+                        <td className="py-4 px-6 font-mono font-bold text-slate-700 dark:text-neutral-200">
+                          {asgn.totalGrade || 100} pts
                         </td>
-                        <td className="py-3.5 px-3 text-center">
-                          {c.attemptsCount > 0 ? (
-                            <span className="px-2 py-0.5 rounded-full bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-neutral-300 font-mono text-[11px]">
-                              Attempt {c.attemptsCount}
-                            </span>
-                          ) : (
-                            <span className="text-slate-400">-</span>
-                          )}
+                        <td className="py-4 px-6 text-slate-500 font-mono">
+                          {asgn.deadline ? new Date(asgn.deadline).toLocaleDateString() : "Rolling"}
                         </td>
-                        <td className="py-3.5 px-3 text-center font-black">
-                          {c.score ? (
-                            <span className="text-slate-900 dark:text-white text-sm">{c.score}%</span>
-                          ) : (
-                            <span className="text-slate-400 font-normal">Pending</span>
-                          )}
-                        </td>
-                        <td className="py-3.5 px-3 text-center">
-                          {c.status.startsWith("Passed") ? (
-                            <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-700 dark:text-emerald-400 font-bold text-[10px]">
-                              PASSED
-                            </span>
-                          ) : c.status === "In Progress" ? (
-                            <span className="px-2 py-0.5 rounded-full bg-amber-500/15 text-amber-700 dark:text-amber-400 font-bold text-[10px]">
-                              IN PROGRESS
-                            </span>
-                          ) : (
-                            <span className="px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-700 dark:text-blue-400 font-bold text-[10px]">
-                              SCHEDULED
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3.5 px-3 text-slate-600 dark:text-neutral-400 text-[11px]">
-                          <div>{c.assessorName}</div>
-                          <div className="text-slate-400 text-[10px]">{c.verifierName}</div>
-                        </td>
-                        <td className="py-3.5 px-3 font-mono text-[10px] text-slate-400">
-                          {c.verificationStamp || "PENDING-FINAL-AUDIT"}
+                        <td className="py-4 px-6">
+                          <Badge className="bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200 text-[10px] font-bold">
+                            Active Assessment
+                          </Badge>
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Signature Blocks */}
-              <div className="pt-6 border-t border-slate-200 dark:border-white/10 grid grid-cols-1 sm:grid-cols-3 gap-6 text-center text-xs">
-                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-white/[0.02] border border-slate-100 dark:border-white/5">
-                  <div className="text-slate-400 text-[10px] uppercase font-bold mb-1">Lead Internal Assessor</div>
-                  <div className="font-bold text-slate-900 dark:text-white">Eng. Ahmed Tarek</div>
-                  <div className="text-emerald-600 dark:text-emerald-400 font-mono text-[10px] mt-1">✓ Electronically Signed</div>
-                </div>
-                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-white/[0.02] border border-slate-100 dark:border-white/5">
-                  <div className="text-slate-400 text-[10px] uppercase font-bold mb-1">External Verifier & Auditor</div>
-                  <div className="font-bold text-slate-900 dark:text-white">Eng. Mostafa Verifier</div>
-                  <div className="text-emerald-600 dark:text-emerald-400 font-mono text-[10px] mt-1">✓ Quality Stamp Affixed</div>
-                </div>
-                <div className="p-4 rounded-2xl bg-slate-50 dark:bg-white/[0.02] border border-slate-100 dark:border-white/5">
-                  <div className="text-slate-400 text-[10px] uppercase font-bold mb-1">Academic Controller</div>
-                  <div className="font-bold text-slate-900 dark:text-white">Examination Board Registry</div>
-                  <div className="text-emerald-600 dark:text-emerald-400 font-mono text-[10px] mt-1">✓ Verified National Record</div>
-                </div>
-              </div>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5} className="py-8 text-center text-slate-400">
+                        No assignments recorded.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
+          </Card>
+        </div>
+      )}
+
+      {/* TAB 4: MY RESULTS */}
+      {activeTab === "results" && (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-xl font-extrabold text-slate-900 dark:text-white">
+              Official Assessment Results
+            </h2>
+            <p className="text-xs text-slate-500">
+              Verified competency results and evaluation feedback
+            </p>
           </div>
-        )}
 
-        {/* ============================================================== */}
-        {/* TAB 4: CANDIDATE INFORMATION & FIELD TRAINING                  */}
-        {/* ============================================================== */}
-        {activeTab === "profile" && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {/* Personal Information */}
-            <div className="p-6 rounded-3xl bg-white dark:bg-[#12131a] border border-slate-200/80 dark:border-white/10 shadow-sm space-y-4">
-              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 pb-3 border-b border-slate-100 dark:border-white/10">
-                <User className="w-4 h-4 text-[#c8102e]" />
-                Personal & Enrollment Records
-              </h3>
-
-              <div className="space-y-3 text-xs">
-                <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-white/5">
-                  <span className="text-slate-400">Full Name:</span>
-                  <span className="font-bold text-slate-900 dark:text-white">{activeDossier.fullNameEn}</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-white/5">
-                  <span className="text-slate-400">National ID (14 digits):</span>
-                  <span className="font-mono font-bold text-slate-900 dark:text-white">{activeDossier.nationalId}</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-white/5">
-                  <span className="text-slate-400">Academic Registration Code:</span>
-                  <span className="font-mono font-bold text-[#c8102e]">{activeDossier.code}</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-white/5">
-                  <span className="text-slate-400">Institutional Email:</span>
-                  <span className="font-mono text-slate-700 dark:text-neutral-300">{activeDossier.email}</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-white/5">
-                  <span className="text-slate-400">Contact Number:</span>
-                  <span className="font-mono text-slate-700 dark:text-neutral-300">{activeDossier.phone}</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-white/5">
-                  <span className="text-slate-400">Date of Birth:</span>
-                  <span className="text-slate-700 dark:text-neutral-300">{activeDossier.dateOfBirth}</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-white/5">
-                  <span className="text-slate-400">Residency Governorate:</span>
-                  <span className="text-slate-700 dark:text-neutral-300">Sharqia - 10th of Ramadan City</span>
-                </div>
-                <div className="flex justify-between py-1.5">
-                  <span className="text-slate-400">Guardian Emergency Phone:</span>
-                  <span className="font-mono text-slate-700 dark:text-neutral-300">{activeDossier.guardianPhone}</span>
-                </div>
-              </div>
+          <Card className="border-slate-100 dark:border-white/5 rounded-3xl bg-white dark:bg-[#12141e] shadow-sm overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-slate-50 dark:bg-white/[0.02] border-b border-slate-100 dark:border-white/5 text-slate-500 uppercase tracking-wider font-bold">
+                  <tr>
+                    <th className="py-4 px-6">Competency</th>
+                    <th className="py-4 px-6">Total Score</th>
+                    <th className="py-4 px-6">Percentage</th>
+                    <th className="py-4 px-6">Decision</th>
+                    <th className="py-4 px-6">Assessor</th>
+                    <th className="py-4 px-6">Date</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-white/5 font-medium">
+                  {results.length > 0 ? (
+                    results.map((r) => {
+                      const pct =
+                        r.scorePercentage ??
+                        (r.maxScore && r.totalScore ? Math.round((r.totalScore / r.maxScore) * 100) : 0);
+                      const isPass = pct >= 80;
+                      return (
+                        <tr key={r.id} className="hover:bg-slate-50/50 dark:hover:bg-white/[0.01]">
+                          <td className="py-4 px-6 font-bold text-slate-900 dark:text-white">
+                            {r.courseName || `Course #${r.courseId}`}
+                          </td>
+                          <td className="py-4 px-6 font-mono font-bold text-slate-700 dark:text-neutral-200">
+                            {r.totalScore || 0} / {r.maxScore || 100}
+                          </td>
+                          <td className="py-4 px-6 font-bold">
+                            <span className={isPass ? "text-emerald-600 font-extrabold" : "text-red-600 font-extrabold"}>
+                              {pct}%
+                            </span>
+                          </td>
+                          <td className="py-4 px-6">
+                            <Badge
+                              className={`text-[11px] font-bold rounded-lg px-2.5 py-0.5 ${
+                                isPass
+                                  ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200"
+                                  : "bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400 border border-red-200"
+                              }`}
+                            >
+                              {isPass ? "Passed" : "Not Passed"}
+                            </Badge>
+                          </td>
+                          <td className="py-4 px-6 text-slate-600 dark:text-neutral-400">
+                            {r.assessorName || "Lead Assessor"}
+                          </td>
+                          <td className="py-4 px-6 text-slate-500 font-mono">
+                            {r.gradedAt ? new Date(r.gradedAt).toLocaleDateString() : "—"}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  ) : (
+                    <tr>
+                      <td colSpan={6} className="py-8 text-center text-slate-400">
+                        No graded results available yet.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
+          </Card>
+        </div>
+      )}
 
-            {/* Industrial Plant & Field Station */}
-            <div className="p-6 rounded-3xl bg-white dark:bg-[#12131a] border border-slate-200/80 dark:border-white/10 shadow-sm space-y-4">
-              <h3 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 pb-3 border-b border-slate-100 dark:border-white/10">
-                <Building2 className="w-4 h-4 text-amber-500" />
-                Industrial Field Station & Training Plant
-              </h3>
-
-              <div className="space-y-3 text-xs">
-                <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-white/5">
-                  <span className="text-slate-400">Assigned Training Complex:</span>
-                  <span className="font-semibold text-slate-900 dark:text-white">{activeDossier.factoryEn}</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-white/5">
-                  <span className="text-slate-400">Department & Discipline:</span>
-                  <span className="font-semibold text-slate-900 dark:text-white">{activeDossier.specializationEn}</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-white/5">
-                  <span className="text-slate-400">Academic Standing:</span>
-                  <span className="font-semibold text-slate-900 dark:text-white">{activeDossier.academicYearEn}</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-white/5">
-                  <span className="text-slate-400">Industrial Plant Supervisor:</span>
-                  <span className="font-bold text-slate-900 dark:text-white">{activeDossier.factorySupervisor}</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-white/5">
-                  <span className="text-slate-400">Attendance & Punctuality:</span>
-                  <span className="font-bold text-emerald-600 dark:text-emerald-400">{activeDossier.attendanceRate}%</span>
-                </div>
-                <div className="flex justify-between py-1.5 border-b border-slate-100 dark:border-white/5">
-                  <span className="text-slate-400">Completed Practical Hours:</span>
-                  <span className="font-bold text-slate-900 dark:text-white">640 Training Hours</span>
-                </div>
-                <div className="flex justify-between py-1.5">
-                  <span className="text-slate-400">Accreditation Framework:</span>
-                  <span className="px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 font-bold">
-                    Dual German-Egyptian Technical Accreditation
-                  </span>
-                </div>
-              </div>
-            </div>
+      {/* TAB 5: MY PROGRESS */}
+      {activeTab === "progress" && (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-xl font-extrabold text-slate-900 dark:text-white">
+              Competency Mastery Progress
+            </h2>
+            <p className="text-xs text-slate-500">
+              Overview of technical competency milestones achieved toward certification
+            </p>
           </div>
-        )}
-      </main>
 
-      {/* ============================================================== */}
-      {/* MODAL: COMPETENCY RUBRICS & AUDIT INSPECTION (All in English)  */}
-      {/* ============================================================== */}
-      <Dialog
-        open={!!inspectedCompetency}
-        onOpenChange={(open) => {
-          if (!open) setInspectedCompetency(null);
-        }}
-      >
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto rounded-3xl p-6 sm:p-8 bg-white dark:bg-[#12131a] border border-slate-200 dark:border-white/15">
-          {inspectedCompetency && (
-            <div className="space-y-6">
-              <DialogHeader className="text-left space-y-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="font-mono text-xs font-black px-2.5 py-0.5 rounded-md bg-[#c8102e]/10 text-[#c8102e] border border-[#c8102e]/20">
-                    {inspectedCompetency.code}
-                  </span>
-                  <span className="text-xs text-slate-400">
-                    {inspectedCompetency.level}
-                  </span>
-                </div>
-                <DialogTitle className="text-xl font-black text-slate-900 dark:text-white">
-                  {inspectedCompetency.nameEn}
-                </DialogTitle>
-                <DialogDescription className="text-xs text-slate-500 dark:text-neutral-400">
-                  {inspectedCompetency.categoryEn} • Competency Evaluation Dossier
-                </DialogDescription>
-              </DialogHeader>
-
-              {/* Status & Score Banner */}
-              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-white/[0.03] border border-slate-200/80 dark:border-white/10 flex items-center justify-between">
-                <div>
-                  <div className="text-xs text-slate-400 font-medium">Evaluation Status</div>
-                  <div className="font-bold text-slate-900 dark:text-white text-sm">
-                    {inspectedCompetency.status.startsWith("Passed")
-                      ? "Competency Cleared & Officially Verified"
-                      : inspectedCompetency.status === "In Progress"
-                      ? "Active Formative Assessment Stage"
-                      : "Scheduled for Upcoming Examination"}
-                  </div>
-                </div>
-
-                {inspectedCompetency.score && (
-                  <div className="text-right">
-                    <div className="text-xs text-slate-400 font-medium">Earned Final Score</div>
-                    <div className="text-2xl font-black text-[#c8102e]">
-                      {inspectedCompetency.score} / {inspectedCompetency.maxScore}
-                    </div>
-                  </div>
-                )}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <Card className="p-6 border-slate-100 dark:border-white/5 rounded-3xl bg-white dark:bg-[#12141e] shadow-sm flex flex-col items-center text-center justify-center">
+              <div className="w-24 h-24 rounded-full border-8 border-[#e21836] flex items-center justify-center font-extrabold text-2xl text-slate-900 dark:text-white mb-4">
+                {averagePercentage}%
               </div>
+              <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
+                Cumulative Mastery
+              </h3>
+              <p className="text-xs text-slate-500 mt-1 max-w-[220px]">
+                Calculated across all evaluated competencies against the 80% passing bar.
+              </p>
+            </Card>
 
-              {/* Criteria Performance List */}
+            <Card className="md:col-span-2 p-6 border-slate-100 dark:border-white/5 rounded-3xl bg-white dark:bg-[#12141e] shadow-sm space-y-4">
+              <h3 className="text-base font-extrabold text-slate-900 dark:text-white mb-2">
+                Milestones & Pillars
+              </h3>
               <div className="space-y-3">
-                <h4 className="text-xs font-bold text-slate-500 dark:text-neutral-400 uppercase tracking-wider flex items-center gap-1.5">
-                  <Award className="w-3.5 h-3.5 text-[#c8102e]" />
-                  Assessed Rubric Performance Criteria:
-                </h4>
-
-                <div className="space-y-2">
-                  {inspectedCompetency.criteria.map((crit, idx) => (
-                    <div
-                      key={idx}
-                      className="p-3 rounded-xl bg-slate-50/70 dark:bg-white/[0.02] border border-slate-100 dark:border-white/5 space-y-1.5"
-                    >
-                      <div className="flex items-center justify-between text-xs font-semibold">
-                        <span className="text-slate-800 dark:text-neutral-200">{crit.nameEn}</span>
-                        <span className="font-mono text-slate-900 dark:text-white">
-                          {inspectedCompetency.score ? `${crit.earned} / ${crit.max}` : `${crit.max} max pts`}
-                        </span>
-                      </div>
-                      {inspectedCompetency.score && (
-                        <Progress value={(crit.earned / crit.max) * 100} className="h-1.5" />
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Assessor Feedback */}
-              <div className="p-4 rounded-2xl bg-slate-50 dark:bg-white/[0.02] border border-slate-200 dark:border-white/10 space-y-1.5">
-                <div className="flex items-center justify-between text-xs">
-                  <span className="font-bold text-slate-700 dark:text-neutral-300">
-                    Lead Assessor Constructive Evaluation:
-                  </span>
-                  <span className="font-semibold text-slate-900 dark:text-white">
-                    {inspectedCompetency.assessorName}
-                  </span>
-                </div>
-                <p className="text-xs text-slate-600 dark:text-neutral-300 italic leading-relaxed">
-                  "{inspectedCompetency.assessorFeedback}"
-                </p>
-              </div>
-
-              {/* External Verifier Seal */}
-              <div className="p-4 rounded-2xl bg-emerald-50/60 dark:bg-emerald-950/20 border border-emerald-200/60 dark:border-emerald-900/40 flex items-center justify-between text-xs">
                 <div>
-                  <div className="font-bold text-emerald-900 dark:text-emerald-300 flex items-center gap-1.5">
-                    <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
-                    External Quality Verifier: {inspectedCompetency.verifierName}
+                  <div className="flex justify-between text-xs font-bold mb-1">
+                    <span className="text-slate-600 dark:text-neutral-300">Competencies Passed</span>
+                    <span className="text-slate-900 dark:text-white font-mono">{passedCount} Completed</span>
                   </div>
-                  <div className="text-[11px] text-emerald-700 dark:text-emerald-400 font-mono mt-0.5">
-                    Accreditation Stamp: {inspectedCompetency.verificationStamp || "AUDIT-QUEUED-2026"}
-                  </div>
+                  <Progress value={Math.min(100, (passedCount / Math.max(1, courses?.length || 4)) * 100)} className="h-2.5 rounded-full" />
                 </div>
+                <div>
+                  <div className="flex justify-between text-xs font-bold mb-1">
+                    <span className="text-slate-600 dark:text-neutral-300">Assessment Readiness</span>
+                    <span className="text-emerald-600 font-mono">Verified</span>
+                  </div>
+                  <Progress value={100} className="h-2.5 rounded-full bg-emerald-100 dark:bg-emerald-950" />
+                </div>
+              </div>
+            </Card>
+          </div>
+        </div>
+      )}
 
-                <Badge className="bg-emerald-600 text-white text-[10px] font-bold">
-                  {inspectedCompetency.verifierApprovalStatus}
+      {/* TAB 6: NOTIFICATIONS */}
+      {activeTab === "notifications" && (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-xl font-extrabold text-slate-900 dark:text-white">
+              Academic Notifications
+            </h2>
+            <p className="text-xs text-slate-500">
+              Important updates regarding competency assessments and schedules
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            <Card className="p-4 border-slate-100 dark:border-white/5 rounded-2xl bg-white dark:bg-[#12141e] shadow-sm flex items-start gap-3.5">
+              <div className="w-8 h-8 rounded-xl bg-blue-50 dark:bg-blue-500/10 text-blue-600 flex items-center justify-center shrink-0 mt-0.5">
+                <Bell className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-slate-900 dark:text-white">
+                  Assessment Cycle Active
+                </p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Your class has been registered for the current assessment cycle. All graded results will sync in real time.
+                </p>
+                <span className="text-[10px] text-slate-400 mt-1 block font-mono">Academic Year 2026/2027</span>
+              </div>
+            </Card>
+
+            <Card className="p-4 border-slate-100 dark:border-white/5 rounded-2xl bg-white dark:bg-[#12141e] shadow-sm flex items-start gap-3.5">
+              <div className="w-8 h-8 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 flex items-center justify-center shrink-0 mt-0.5">
+                <ShieldCheck className="w-4 h-4" />
+              </div>
+              <div>
+                <p className="text-xs font-bold text-slate-900 dark:text-white">
+                  Standardized Passing Criterion
+                </p>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Minimum passing score for each competency is 80%. Passed competencies are protected against overwriting.
+                </p>
+                <span className="text-[10px] text-slate-400 mt-1 block font-mono">Evaluation Rule</span>
+              </div>
+            </Card>
+          </div>
+        </div>
+      )}
+
+      {/* TAB 7: PROFILE */}
+      {activeTab === "profile" && (
+        <div className="space-y-6">
+          <div>
+            <h2 className="text-xl font-extrabold text-slate-900 dark:text-white">
+              My Profile
+            </h2>
+            <p className="text-xs text-slate-500">
+              Verified candidate academic identification
+            </p>
+          </div>
+
+          <Card className="p-6 sm:p-8 border-slate-100 dark:border-white/5 rounded-3xl bg-white dark:bg-[#12141e] shadow-sm max-w-2xl">
+            <div className="flex items-center gap-4 mb-6 pb-6 border-b border-slate-100 dark:border-white/5">
+              <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-[#c8102e] to-[#e21836] text-white font-extrabold text-2xl flex items-center justify-center shadow-md">
+                {studentName.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <h3 className="text-lg font-extrabold text-slate-900 dark:text-white">
+                  {studentName}
+                </h3>
+                {studentProfile?.fullNameAr && (
+                  <p className="text-xs text-slate-500 font-medium">{studentProfile.fullNameAr}</p>
+                )}
+                <Badge className="mt-1 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200 text-[10px] font-bold">
+                  Active Student
                 </Badge>
               </div>
+            </div>
 
-              <div className="flex justify-end pt-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setInspectedCompetency(null)}
-                  className="rounded-xl font-bold text-xs"
-                >
-                  Close Inspection
-                </Button>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-white/[0.03]">
+                <span className="text-slate-400 block font-semibold mb-1">Email / Student Account</span>
+                <span className="font-mono font-bold text-slate-800 dark:text-neutral-200">
+                  {studentEmail}
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-white/[0.03]">
+                <span className="text-slate-400 block font-semibold mb-1">Class / Cohort</span>
+                <span className="font-bold text-slate-800 dark:text-neutral-200">
+                  {className}
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-white/[0.03]">
+                <span className="text-slate-400 block font-semibold mb-1">Enrolled Program</span>
+                <span className="font-bold text-slate-800 dark:text-neutral-200">
+                  Elsewedy Applied Technology Program
+                </span>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-white/[0.03]">
+                <span className="text-slate-400 block font-semibold mb-1">Competencies Passed</span>
+                <span className="font-mono font-bold text-emerald-600">
+                  {passedCount} Completed
+                </span>
               </div>
             </div>
-          )}
-        </DialogContent>
-      </Dialog>
+          </Card>
+        </div>
+      )}
     </div>
   );
 }

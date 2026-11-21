@@ -52,10 +52,10 @@ const DEMO_PRESETS = [
   },
   {
     role: "Verifier",
-    title: "Student 2 (Verification / QA)",
-    email: "student2@elsewedy.com",
-    password: "Student@123",
-    badge: "Internal QA",
+    title: "Eng. Mohamed (Verifier / QA)",
+    email: "verifier1@elsewedy.com",
+    password: "Verifier@123",
+    badge: "Quality Verifier",
     badgeClass: "border-emerald-500/30 text-emerald-400 bg-emerald-500/10",
   },
 ];

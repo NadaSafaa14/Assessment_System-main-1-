@@ -66,8 +66,7 @@ export default function ControllerStudentsPage() {
         return (
           s.fullNameEn.toLowerCase().includes(q) ||
           s.fullNameAr?.toLowerCase().includes(q) ||
-          s.email.toLowerCase().includes(q) ||
-          s.nationalId.includes(q)
+          s.email.toLowerCase().includes(q)
         );
       }
       return true;
@@ -142,7 +141,7 @@ export default function ControllerStudentsPage() {
           <div className="relative flex-1">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-neutral-500 w-4 h-4" />
             <Input
-              placeholder="Search by name, email, or national ID..."
+              placeholder="Search by name or email..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="pl-10 h-10 rounded-xl bg-slate-50 dark:bg-[#16161f] border-slate-200/80 dark:border-white/10 text-xs sm:text-sm"
@@ -242,8 +241,12 @@ export default function ControllerStudentsPage() {
 
                       <div className="flex items-center gap-3 text-xs text-slate-500 dark:text-neutral-400 mt-1 flex-wrap font-mono">
                         <span>{student.email}</span>
-                        <span>·</span>
-                        <span>National ID: {student.nationalId}</span>
+                        {student.className && (
+                          <>
+                            <span>·</span>
+                            <span className="font-sans font-medium text-slate-600 dark:text-neutral-300">{student.className}</span>
+                          </>
+                        )}
                       </div>
                     </div>
                   </div>

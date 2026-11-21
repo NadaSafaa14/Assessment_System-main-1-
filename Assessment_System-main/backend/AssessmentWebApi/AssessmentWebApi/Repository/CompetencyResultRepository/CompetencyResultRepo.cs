@@ -1,4 +1,4 @@
-﻿using AssessmentWebApi.Data;
+using AssessmentWebApi.Data;
 using AssessmentWebApi.Dto_s.CompetencyResultDto_s;
 using AssessmentWebApi.Models;
 using Holistic_Training.Repository.GenericRepo;
@@ -118,16 +118,44 @@ namespace AssessmentWebApi.Repository.CompetencyResultRepository
             if (status is null)
                 throw new InvalidOperationException($"Status {request.ResultStatusId} not found.");
 
+            // 1. Business Rule: Ensure that a passed Competency cannot be accidentally reassessed or overwritten
+            var passedResult = await (
+                from r in _context.CompetencyResults
+                join s in _context.Statuses on r.ResultStatusId equals s.Id
+                where r.StudentId == request.StudentId && r.CourseId == request.CourseId
+                      && (r.ResultStatusId == 70 || s.StatusName.ToLower() == "passed")
+                select r
+            ).FirstOrDefaultAsync();
+
+            if (passedResult != null)
+            {
+                throw new InvalidOperationException(
+                    $"Student {request.StudentId} has already passed Competency {request.CourseId}. A passed competency cannot be reassessed or overwritten.");
+            }
+
             decimal? totalScore = request.TotalScore;
             decimal? maxScore   = request.MaxScore;
 
             // Auto-calculate from submissions if scores not provided
             if (totalScore is null || maxScore is null)
             {
-                // Get all assignments for this course
+                // In database mapping, CourseRoundAssignment.CourseId maps to DB column CourseRoundId
                 var assignments = await _context.CourseRoundAssignments
-                    .Where(a => a.CourseId == request.CourseId)
+                    .Where(a => a.CourseId == request.CourseRoundId)
                     .ToListAsync();
+
+                // If not found by round ID, try finding assignments associated with this course
+                if (!assignments.Any())
+                {
+                    var roundIds = await _context.CourseRounds
+                        .Where(cr => cr.CourseId == request.CourseId)
+                        .Select(cr => cr.Id)
+                        .ToListAsync();
+
+                    assignments = await _context.CourseRoundAssignments
+                        .Where(a => roundIds.Contains(a.CourseId))
+                        .ToListAsync();
+                }
 
                 var assignmentIds = assignments.Select(a => a.Id).ToList();
 
@@ -142,6 +170,25 @@ namespace AssessmentWebApi.Repository.CompetencyResultRepository
 
                 if (maxScore is null)
                     maxScore = assignments.Sum(a => a.TotalGrade);
+            }
+
+            // 2. Business Rule: Prevent duplicate result records for the same student, course, and round
+            var existingResult = await _context.CompetencyResults
+                .FirstOrDefaultAsync(r => r.StudentId == request.StudentId &&
+                                          r.CourseId == request.CourseId &&
+                                          r.CourseRoundId == request.CourseRoundId);
+
+            if (existingResult != null)
+            {
+                existingResult.TotalScore     = totalScore;
+                existingResult.MaxScore       = maxScore;
+                existingResult.ResultStatusId = request.ResultStatusId;
+                existingResult.AssessorId     = request.AssessorId;
+                existingResult.Notes          = request.Notes;
+                existingResult.GradedAt       = request.GradedAt ?? DateTime.UtcNow;
+
+                await _context.SaveChangesAsync();
+                return (await GetById(existingResult.Id))!;
             }
 
             var result = new CompetencyResult

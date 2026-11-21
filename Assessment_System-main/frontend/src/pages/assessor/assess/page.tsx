@@ -493,7 +493,6 @@ export default function AssessStudentPage() {
             <p className="text-slate-300 text-xs sm:text-sm max-w-2xl leading-relaxed font-mono">
               {candidateEmail}
               {candidateClass && <span> · Class: {candidateClass}</span>}
-              <span> · ID: {candidateNationalId}</span>
             </p>
           </div>
 

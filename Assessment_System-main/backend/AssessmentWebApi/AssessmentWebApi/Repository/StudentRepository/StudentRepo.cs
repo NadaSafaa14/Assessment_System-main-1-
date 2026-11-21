@@ -175,12 +175,18 @@ namespace AssessmentWebApi.Repository.StudentRepository
         // ─────────────────────────────────────────────────────────────
         public async Task<ICollection<StudentResDto>> GetByAssessor(long assessorAccountId)
         {
-            var studentIds = await (
-                from sub  in _context.CourseRoundAssignmentSubmissions
-                join asgn in _context.CourseRoundAssignments on sub.AssignmentId equals asgn.Id
-                where asgn.InstructorId == assessorAccountId
-                select sub.StudentId
-            ).Distinct().ToListAsync();
+            var assignedByAsgn = from sub in _context.CourseRoundAssignmentSubmissions
+                                 join asgn in _context.CourseRoundAssignments on sub.AssignmentId equals asgn.Id
+                                 where asgn.InstructorId == assessorAccountId
+                                 select sub.StudentId;
+
+            var assignedByRound = from sub in _context.CourseRoundAssignmentSubmissions
+                                  join asgn in _context.CourseRoundAssignments on sub.AssignmentId equals asgn.Id
+                                  join cri in _context.CourseRoundInstructors on asgn.CourseId equals cri.CourseRoundId
+                                  where cri.InstructorAccountId == assessorAccountId
+                                  select sub.StudentId;
+
+            var studentIds = await assignedByAsgn.Union(assignedByRound).Distinct().ToListAsync();
 
             if (!studentIds.Any()) return new List<StudentResDto>();
 
@@ -261,13 +267,29 @@ namespace AssessmentWebApi.Repository.StudentRepository
             if (course is null)
                 throw new InvalidOperationException($"Course {request.CourseId} was not found.");
 
-            var tasks = await _context.CourseRoundAssignments
-                .Where(a => a.CourseId == request.CourseId)
-                .ToListAsync();
+            // In database schema, CourseRoundAssignment.CourseId maps to column CourseRoundId
+            List<CourseRoundAssignment> tasks;
+            if (request.CourseRoundId.HasValue)
+            {
+                tasks = await _context.CourseRoundAssignments
+                    .Where(a => a.CourseId == request.CourseRoundId.Value)
+                    .ToListAsync();
+            }
+            else
+            {
+                var roundIds = await _context.CourseRounds
+                    .Where(r => r.CourseId == request.CourseId)
+                    .Select(r => r.Id)
+                    .ToListAsync();
+
+                tasks = await _context.CourseRoundAssignments
+                    .Where(a => roundIds.Contains(a.CourseId) || a.CourseId == request.CourseId)
+                    .ToListAsync();
+            }
 
             if (!tasks.Any())
                 throw new InvalidOperationException(
-                    $"Course {request.CourseId} has no tasks. Add CourseRoundAssignments first.");
+                    $"Course {request.CourseId} has no tasks in round {(request.CourseRoundId.HasValue ? request.CourseRoundId.Value.ToString() : "active")}. Add CourseRoundAssignments first.");
 
             var pendingStatus = await _context.Statuses
                 .FirstOrDefaultAsync(s => s.StatusName.ToLower() == "pending");

@@ -1,4 +1,4 @@
-﻿using AssessmentWebApi.Data;
+using AssessmentWebApi.Data;
 using AssessmentWebApi.Dto_s.CourseRoundAssignmentDto_s;
 using AssessmentWebApi.Models;
 using Holistic_Training.Repository.GenericRepo;
@@ -59,7 +59,15 @@ namespace AssessmentWebApi.Repository.CourseRoundAssignmentRepository
             var query = _context.CourseRoundAssignments.AsQueryable();
 
             if (courseId.HasValue)
-                query = query.Where(a => a.CourseId == courseId.Value);
+            {
+                var roundIds = await _context.CourseRounds
+                    .Where(r => r.CourseId == courseId.Value)
+                    .Select(r => r.Id)
+                    .ToListAsync();
+                roundIds.Add(courseId.Value);
+
+                query = query.Where(a => roundIds.Contains(a.CourseId));
+            }
 
             return await Project(query);
         }

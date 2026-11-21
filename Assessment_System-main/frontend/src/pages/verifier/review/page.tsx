@@ -169,8 +169,8 @@ export default function VerifierReviewPage() {
       });
 
       const percentage = maxScore > 0 ? (totalScore / maxScore) * 100 : 0;
-      const PASS_STATUS_ID = 2; // Pass status in DB
-      const FAIL_STATUS_ID = 4; // Redo status in DB (or 3: Fail)
+      const PASS_STATUS_ID = 70; // Pass status in DB
+      const FAIL_STATUS_ID = 71; // Not passed status in DB
       const passed = percentage >= 80;
 
       // Update backend record
@@ -278,7 +278,7 @@ export default function VerifierReviewPage() {
 
   const formStudent: Student = {
     id: result.studentId.toString(),
-    code: student?.nationalId || `STU${result.studentId}`,
+    code: student?.email || `STU${result.studentId}`,
     fullName:
       result.studentName ||
       student?.fullNameEn ||

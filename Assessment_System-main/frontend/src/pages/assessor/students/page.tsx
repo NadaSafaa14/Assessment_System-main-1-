@@ -136,8 +136,7 @@ export default function AssessorStudentsPage() {
       (s) =>
         s.fullNameEn.toLowerCase().includes(q) ||
         s.fullNameAr?.toLowerCase().includes(q) ||
-        s.email.toLowerCase().includes(q) ||
-        s.nationalId.includes(q),
+        s.email.toLowerCase().includes(q),
     );
   }, [resolvedStudents, searchQuery, filterStatus]);
 
@@ -252,7 +251,7 @@ export default function AssessorStudentsPage() {
           <div className="relative flex-1 max-w-md">
             <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 dark:text-neutral-500 w-4 h-4" />
             <Input
-              placeholder="Search by student name, email, or national ID..."
+              placeholder="Search by student name or email..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               disabled={isLoading}
@@ -407,7 +406,7 @@ export default function AssessorStudentsPage() {
 
                   <div className="mt-3 space-y-1 text-xs text-slate-500 dark:text-neutral-400 font-mono">
                     <p className="truncate">{student.email}</p>
-                    <p>ID: {student.nationalId}</p>
+                    {student.className && <p className="text-slate-600 dark:text-neutral-300 font-sans font-medium">{student.className}</p>}
                   </div>
                 </div>
 

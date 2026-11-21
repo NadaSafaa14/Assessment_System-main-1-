@@ -251,14 +251,14 @@ export default function ControllerStudentDetailPage() {
         <Card className="p-5 rounded-2xl bg-white dark:bg-[#121218] border border-slate-200/80 dark:border-white/10 shadow-sm">
           <div className="flex items-center justify-between mb-3">
             <span className="text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-neutral-400">
-              National ID
+              Student Status
             </span>
             <div className="w-9 h-9 rounded-xl bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-neutral-300 border border-slate-200/80 dark:border-white/10 flex items-center justify-center">
               <User className="w-4 h-4" />
             </div>
           </div>
           <p className="text-sm sm:text-base font-extrabold text-slate-900 dark:text-white font-mono truncate">
-            {student.nationalId}
+            {student.isActive ? "Active Enrolled" : "Inactive"}
           </p>
         </Card>
 
